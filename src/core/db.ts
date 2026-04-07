@@ -279,10 +279,11 @@ export class BrainDB {
 
   // Insert a single embedding
   insertEmbedding(pageId: number, chunkIndex: number, chunkText: string, embeddingBytes: Uint8Array, model: string): void {
+    const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT INTO page_embeddings (page_id, chunk_index, chunk_text, embedding, model)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(pageId, chunkIndex, chunkText, embeddingBytes, model);
+      INSERT INTO page_embeddings (page_id, chunk_index, chunk_text, embedding, model, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(pageId, chunkIndex, chunkText, embeddingBytes, model, now);
   }
 
   // Delete all embeddings for a page (for re-embedding on update)
@@ -334,6 +335,38 @@ export class BrainDB {
   getEmbeddingCount(): number {
     const row = this.db.prepare("SELECT COUNT(*) as count FROM page_embeddings").get() as { count: number };
     return row.count;
+  }
+
+  // Find pages whose embeddings are stale (missing or outdated)
+  getStalePages(): { slug: string; pageId: number; reason: "no_embedding" | "updated_since_embedding" }[] {
+    const results: { slug: string; pageId: number; reason: "no_embedding" | "updated_since_embedding" }[] = [];
+
+    // Pages with no embedding at all
+    const noEmbed = this.db.prepare(`
+      SELECT p.slug, p.id as page_id
+      FROM pages p
+      LEFT JOIN page_embeddings pe ON p.id = pe.page_id
+      WHERE pe.id IS NULL
+    `).all() as { slug: string; page_id: number }[];
+
+    for (const row of noEmbed) {
+      results.push({ slug: row.slug, pageId: row.page_id, reason: "no_embedding" });
+    }
+
+    // Pages with embedding but updated since
+    const updatedSince = this.db.prepare(`
+      SELECT p.slug, p.id as page_id
+      FROM pages p
+      JOIN page_embeddings pe ON p.id = pe.page_id
+      GROUP BY p.id
+      HAVING p.updated_at > MAX(pe.created_at)
+    `).all() as { slug: string; page_id: number }[];
+
+    for (const row of updatedSince) {
+      results.push({ slug: row.slug, pageId: row.page_id, reason: "updated_since_embedding" });
+    }
+
+    return results;
   }
 }
 

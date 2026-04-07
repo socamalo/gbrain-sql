@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterEach, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { parseMarkdownFile, extractLinks } from "../src/core/markdown";
 import { splitIntoChunks, cosineSimilarity } from "../src/core/embeddings";
@@ -209,7 +209,18 @@ describe("cosineSimilarity", () => {
 describe("BUG: importDir link insertion - slug not resolved to ID", () => {
   const TEST_DB = "/tmp/gbrain_link_bug_test.db";
 
+  beforeEach(() => {
+    const fs = require("fs");
+    for (const p of ["/tmp/gbrain_link_bug_test.db", "/tmp/gbrain_bug_demo.db", "/tmp/gbrain_fix_test.db"]) {
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+      if (fs.existsSync(p + "-wal")) fs.unlinkSync(p + "-wal");
+      if (fs.existsSync(p + "-shm")) fs.unlinkSync(p + "-shm");
+    }
+  });
+
   function setupDb(): Database {
+    const fs = require("fs");
+    if (fs.existsSync(TEST_DB)) fs.unlinkSync(TEST_DB);
     const db = new Database(TEST_DB);
     db.exec(`
       CREATE TABLE IF NOT EXISTS pages (
@@ -379,6 +390,13 @@ describe("BUG: importDir link insertion - slug not resolved to ID", () => {
 describe("importDir link resolution integration", () => {
   const TEST_DB = "/tmp/gbrain_import_integration.db";
 
+  beforeEach(() => {
+    const fs = require("fs");
+    if (fs.existsSync(TEST_DB)) fs.unlinkSync(TEST_DB);
+    if (fs.existsSync(TEST_DB + "-wal")) fs.unlinkSync(TEST_DB + "-wal");
+    if (fs.existsSync(TEST_DB + "-shm")) fs.unlinkSync(TEST_DB + "-shm");
+  });
+
   test("resolves relative links correctly during import", () => {
     const fs = require("fs");
     const path = require("path");
@@ -475,5 +493,70 @@ Acme is a tech company.
     fs.rmSync(tmpDir, { recursive: true });
 
     console.log("Integration test PASSED");
+  });
+});
+
+// ============================================================
+// getStalePages tests
+// ============================================================
+
+describe("getStalePages", () => {
+  const TEST_DB = "/tmp/gbrain_stale_test.db";
+
+  function cleanupDb() {
+    const fs = require("fs");
+    if (fs.existsSync(TEST_DB)) fs.unlinkSync(TEST_DB);
+    if (fs.existsSync(TEST_DB + "-wal")) fs.unlinkSync(TEST_DB + "-wal");
+    if (fs.existsSync(TEST_DB + "-shm")) fs.unlinkSync(TEST_DB + "-shm");
+  }
+
+  function setupDb(): BrainDB {
+    cleanupDb();
+    const { BrainDB } = require("../src/core/db");
+    return new BrainDB(TEST_DB);
+  }
+
+  beforeEach(() => {
+    cleanupDb();
+  });
+
+  afterEach(() => {
+    cleanupDb();
+  });
+
+  test("page with no embedding is detected as stale", () => {
+    const db = setupDb();
+    db.putPage("test/page1", "person", "Test Page 1", "Content 1", "", {});
+    const stale = db.getStalePages();
+    expect(stale.some(p => p.slug === "test/page1")).toBe(true);
+    expect(stale.find(p => p.slug === "test/page1")!.reason).toBe("no_embedding");
+    db.close();
+  });
+
+  test("page with embedding and not updated is not stale", () => {
+    const db = setupDb();
+    db.putPage("test/page2", "person", "Test Page 2", "Content 2", "", {});
+    const pageId = db.getPageId("test/page2")!;
+    const fakeEmbedding = new Uint8Array(128);
+    db.insertEmbedding(pageId, 0, "chunk text", fakeEmbedding, "test-model");
+    const stale = db.getStalePages();
+    expect(stale.some(p => p.slug === "test/page2")).toBe(false);
+    db.close();
+  });
+
+  test("page updated after embedding is detected as stale", () => {
+    const db = setupDb();
+    db.putPage("test/page3", "person", "Test Page 3", "Content 3", "", {});
+    const pageId = db.getPageId("test/page3")!;
+    const fakeEmbedding = new Uint8Array(128);
+    db.insertEmbedding(pageId, 0, "chunk text", fakeEmbedding, "test-model");
+    // Simulate page update after embedding
+    const later = new Date(Date.now() + 1000).toISOString();
+    db.db.prepare("UPDATE pages SET updated_at = ? WHERE id = ?").run(later, pageId);
+    const stale = db.getStalePages();
+    const page3Stale = stale.find(p => p.slug === "test/page3");
+    expect(page3Stale).toBeDefined();
+    expect(page3Stale!.reason).toBe("updated_since_embedding");
+    db.close();
   });
 });

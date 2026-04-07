@@ -220,6 +220,55 @@ switch (command) {
     const db = getDb();
     const model = db.getConfig("embedding_model") || "qwen3-embedding:latest";
 
+    // Handle gbrain embed --stale
+    if (slug === "--stale") {
+      const stalePages = db.getStalePages();
+
+      if (stalePages.length === 0) {
+        console.log("Done. 0 pages, 0 chunks re-embedded.");
+        db.close();
+        break;
+      }
+
+      let totalPages = 0;
+      let totalChunks = 0;
+
+      console.log(`Re-embedding ${stalePages.length} stale pages...`);
+
+      for (const page of stalePages) {
+        const pageData = db.getPage(page.slug);
+        if (!pageData) continue;
+
+        db.deleteEmbeddingsForPage(page.pageId);
+
+        const fullContent = pageData.compiled_truth + "\n\n" + pageData.timeline;
+        const chunks = splitIntoChunks(fullContent);
+
+        if (page.slug.length <= 50) {
+          console.log(`Embedding ${page.slug}... ${chunks.length} chunks.`);
+        }
+
+        let pageChunks = 0;
+        for (const chunk of chunks) {
+          try {
+            const embeddingBytes = await embedToBytes(chunk.text, model);
+            db.insertEmbedding(page.pageId, chunk.index, chunk.text, embeddingBytes, model);
+            pageChunks++;
+          } catch (err) {
+            console.error(`\nError embedding ${page.slug} chunk ${chunk.index}: ${err}`);
+            db.close();
+            process.exit(1);
+          }
+        }
+        totalChunks += pageChunks;
+        totalPages++;
+      }
+
+      console.log(`Done. ${totalPages} pages, ${totalChunks} chunks re-embedded.`);
+      db.close();
+      break;
+    }
+
     if (slug) {
       // Embed single page
       const page = db.getPage(slug);
