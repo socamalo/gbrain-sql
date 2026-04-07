@@ -120,6 +120,10 @@ gbrain stats
 
 # Bulk import markdown files
 gbrain import ./notes/
+
+# Ingest one or more markdown files (each ## section becomes a chunk with metadata)
+gbrain ingest article.md
+gbrain ingest doc1.md doc2.md doc3.md
 ```
 
 ## Claude Code Memory Integration
@@ -209,6 +213,7 @@ gbrain query "what projects am I working on"
 |---------|-------------|
 | `gbrain get <slug>` | Get a page by slug |
 | `gbrain put <slug> < file.md` | Create/update a page (auto-embeds) |
+| `gbrain ingest <file1.md> [file2.md] ...` | Ingest one or more markdown files (with chunk metadata) |
 | `gbrain search "<query>"` | Full-text search (FTS5) |
 | `gbrain query "<question>"` | Semantic search (vector) |
 | `gbrain list [--type <type>]` | List pages with optional filter |

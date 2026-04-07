@@ -123,6 +123,7 @@ GBrain/
 | `gbrain init` | Initialize new brain.db |
 | `gbrain get <slug>` | Get page by slug |
 | `gbrain put <slug> [file.md]` | Create/update page (auto-embeds) |
+| `gbrain ingest <file1.md> [file2.md] ...` | Ingest one or more markdown files (with chunk metadata) |
 | `gbrain list [--type <type>] [--limit N]` | List pages |
 | `gbrain search <query>` | Full-text search (FTS5) |
 | `gbrain query <question>` | Semantic search (vector) |

@@ -15,6 +15,13 @@ export interface Chunk {
   header: string; // section header if found
 }
 
+export interface ChunkWithMeta {
+  index: number;
+  text: string; // includes [CHUNK_META] prefix
+  header: string;
+  section_index: number;
+}
+
 /**
  * Call Ollama embeddings API
  */
@@ -58,7 +65,7 @@ export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
 }
 
 /**
- * Split content into chunks by ## section headers
+ * Split content into chunks by ## section headers (legacy, no metadata)
  */
 export function splitIntoChunks(content: string): Chunk[] {
   const chunks: Chunk[] = [];
@@ -102,6 +109,79 @@ export function splitIntoChunks(content: string): Chunk[] {
   }
 
   return chunks;
+}
+
+/**
+ * Split content into chunks by ## section headers, with [CHUNK_META] prefix.
+ * title and agenda are pre-extracted from the document.
+ */
+export function splitIntoChunksWithMeta(
+  content: string,
+  title: string,
+  agenda: string[]
+): ChunkWithMeta[] {
+  const chunks: ChunkWithMeta[] = [];
+
+  if (!content || content.trim() === "") {
+    return chunks;
+  }
+
+  // Split by ## headers (but not ### or deeper)
+  const sectionRegex = /(?:^|\n)(## [^#][^\n]*)\n/;
+  const parts = content.split(sectionRegex);
+
+  let currentIndex = 0;
+
+  // If there's content before the first ##, make it chunk 0
+  if (parts[0] && parts[0].trim()) {
+    const chunkText = buildChunkText(title, agenda, "", 0, parts[0].trim());
+    chunks.push({
+      index: currentIndex++,
+      text: chunkText,
+      header: "",
+      section_index: 0,
+    });
+  }
+
+  // Process pairs: [header, content]
+  for (let i = 1; i < parts.length; i += 2) {
+    const header = parts[i]?.replace(/^## /, "").trim() ?? "";
+    const bodyContent = parts[i + 1] ?? "";
+
+    if (bodyContent.trim()) {
+      // Find section index in agenda
+      const sectionIndex = agenda.indexOf(header);
+      const chunkText = buildChunkText(title, agenda, header, sectionIndex >= 0 ? sectionIndex : currentIndex, bodyContent.trim());
+      chunks.push({
+        index: currentIndex++,
+        text: chunkText,
+        header,
+        section_index: sectionIndex >= 0 ? sectionIndex : currentIndex - 1,
+      });
+    }
+  }
+
+  return chunks;
+}
+
+function buildChunkText(
+  title: string,
+  agenda: string[],
+  section: string,
+  sectionIndex: number,
+  bodyContent: string
+): string {
+  const metaLines = [
+    "[CHUNK_META]",
+    `title: ${title}`,
+    `agenda: [${agenda.join(", ")}]`,
+    section ? `section: ${section}` : `section: (intro)`,
+    `section_index: ${sectionIndex}`,
+    "[/CHUNK_META]",
+    "",
+    bodyContent,
+  ];
+  return metaLines.join("\n");
 }
 
 /**

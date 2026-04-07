@@ -3,10 +3,40 @@
 Ingest meetings, articles, docs, and conversations into the brain.
 Follows the compiled truth + timeline architecture.
 
-## Workflow
+## Two Ingest Methods
 
-1. **Read the source.** Meeting transcript, article, document, conversation log.
-   Identify: participants, companies, topics, decisions, action items.
+### 1. `gbrain ingest <file1.md> [file2.md] ...` — Markdown Files
+
+Ingest one or more markdown files. Each file becomes one page; each `## ` section becomes a chunk with metadata.
+
+```bash
+gbrain ingest article.md
+gbrain ingest doc1.md doc2.md doc3.md
+```
+
+**Chunk metadata:** Every chunk includes `[CHUNK_META]` block so any retrieved chunk has full context:
+```
+[CHUNK_META]
+title: 如何学习 Go
+agenda: [概述, 安装, 基础语法, 并发编程]
+section: 基础语法
+section_index: 2
+[/CHUNK_META]
+
+<chunk content>
+```
+
+**Behavior:**
+- Slug: file path minus `.md` (e.g. `docs/go.md` → `docs/go`)
+- Type: frontmatter `type` > default `"md"`
+- Agenda: frontmatter `agenda` > auto-extracted from `## ` headings
+- Upsert: if slug exists, update + re-embed all chunks
+
+### 2. Manual Ingest — Meetings, Conversations
+
+For meetings and conversations that need entity extraction:
+
+1. **Read the source.** Identify: participants, companies, topics, decisions, action items.
 
 2. **For each entity mentioned:**
    - `gbrain get <slug>` — does a page exist?

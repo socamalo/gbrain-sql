@@ -46,9 +46,23 @@ export function parseMarkdownFile(content: string, filePath: string): ParsedPage
   };
 }
 
-function extractTitle(content: string): string | null {
+export function extractTitle(content: string): string | null {
   const match = content.match(/^#\s+(.+)$/m);
   return match ? match[1].trim() : null;
+}
+
+/**
+ * Extract all ## section headings from content, in document order.
+ */
+export function extractAgenda(content: string): string[] {
+  const agenda: string[] = [];
+  // Match ## at start of line (but not ### or deeper)
+  const regex = /^## ([^#][^\n]*)$/gm;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    agenda.push(match[1].trim());
+  }
+  return agenda;
 }
 
 export function renderPage(

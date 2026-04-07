@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { BrainDB } from "./core/db";
-import { parseMarkdownFile, renderPage, extractLinks, slugFromPath } from "./core/markdown";
-import { splitIntoChunks, embedToBytes, embed } from "./core/embeddings";
+import { parseMarkdownFile, renderPage, extractLinks, slugFromPath, extractAgenda, extractTitle } from "./core/markdown";
+import { splitIntoChunks, splitIntoChunksWithMeta, embedToBytes, embed } from "./core/embeddings";
 import matter from "gray-matter";
 
 const DB_PATH = process.env.GBRAIN_DB || "./brain.db";
@@ -346,6 +346,16 @@ switch (command) {
     break;
   }
 
+  case "ingest": {
+    const files = args.slice(1);
+    if (files.length === 0) {
+      console.error("Usage: gbrain ingest <file1.md> [file2.md] ...");
+      process.exit(1);
+    }
+    await ingestFiles(files);
+    break;
+  }
+
   case "tags": {
     const slug = args[1];
     if (!slug) {
@@ -632,7 +642,8 @@ Commands:
   gbrain backlinks <slug>         Get pages linking to this page
   gbrain delete [-y|--yes] <slug> [...]  Delete pages (auto-backup first)
   gbrain stats                    Show brain statistics
-  gbrain import <dir>             Import markdown files
+  gbrain import <dir>             Import markdown files (bulk)
+  gbrain ingest <file.md> [...]   Ingest one or more markdown files (with chunk metadata)
   gbrain backup                  Create a timestamped backup of the database
   gbrain backups                 List all available backups
   gbrain restore [file]          Restore from a backup (interactive if no file specified)
@@ -725,6 +736,98 @@ async function importDir(dir: string) {
 
   console.log("Done!");
   db.close();
+}
+
+async function ingestFiles(files: string[]) {
+  const fs = await import("fs");
+  const pathModule = await import("path");
+
+  // Check all files exist first
+  for (const file of files) {
+    if (!fs.existsSync(file)) {
+      console.error(`File not found: ${file}`);
+      process.exit(1);
+    }
+  }
+
+  const db = getDb();
+  const model = db.getConfig("embedding_model") || "qwen3-embedding:latest";
+
+  console.log(`Ingesting ${files.length} file(s)...`);
+
+  for (const file of files) {
+    const content = fs.readFileSync(file, "utf-8");
+    const relPath = pathModule.relative(".", file).replace(/\\/g, "/");
+    const parsed = parseMarkdownFile(content, relPath);
+
+    // Determine title: frontmatter > extract from content > filename
+    const title = parsed.frontmatter.title as string
+      || extractTitle(parsed.compiled_truth + "\n" + parsed.timeline)
+      || pathModule.basename(file, ".md");
+
+    // Determine type: frontmatter.type > "md"
+    const type = (parsed.frontmatter.type as string) || "md";
+
+    // Determine agenda: frontmatter.agenda > auto-extract from content
+    let agenda: string[];
+    if (Array.isArray(parsed.frontmatter.agenda)) {
+      agenda = parsed.frontmatter.agenda as string[];
+    } else {
+      // Auto-extract from ## headings
+      const fullContent = parsed.compiled_truth + "\n" + parsed.timeline;
+      agenda = extractAgenda(fullContent);
+    }
+
+    // Slug from file path
+    const slug = relPath.replace(/\.md$/, "");
+
+    // Delete existing page embeddings if page exists
+    const existingPageId = db.getPageId(slug);
+    if (existingPageId) {
+      db.deleteEmbeddingsForPage(existingPageId);
+    }
+
+    // Upsert page
+    db.putPage(slug, type, title, parsed.compiled_truth, parsed.timeline, parsed.frontmatter);
+
+    // Get page ID after put
+    const pageId = db.getPageId(slug)!;
+
+    // Delete old FTS entry and re-insert
+    // Note: putPage doesn't update FTS (only insert), so we need manual FTS update
+    // Actually looking at db.ts, putPage uses INSERT ON CONFLICT which triggers the UPDATE trigger
+    // So FTS should be updated automatically
+
+    // Extract and insert tags
+    if (parsed.frontmatter.tags && Array.isArray(parsed.frontmatter.tags)) {
+      for (const tag of parsed.frontmatter.tags) {
+        db.insertTag(pageId, tag as string);
+      }
+    }
+
+    // Generate chunks with metadata for compiled_truth
+    const fullContent = parsed.compiled_truth + "\n\n" + parsed.timeline;
+    const chunks = splitIntoChunksWithMeta(fullContent, title, agenda);
+
+    if (chunks.length > 0) {
+      let embeddedCount = 0;
+      for (const chunk of chunks) {
+        try {
+          const embeddingBytes = await embedToBytes(chunk.text, model);
+          db.insertEmbedding(pageId, chunk.index, chunk.text, embeddingBytes, model);
+          embeddedCount++;
+        } catch (err) {
+          console.warn(`  Warning: failed to embed chunk ${chunk.index}: ${err}`);
+        }
+      }
+      console.log(`Ingested: ${slug} (${embeddedCount}/${chunks.length} chunks embedded)`);
+    } else {
+      console.log(`Ingested: ${slug} (no chunks)`);
+    }
+  }
+
+  db.close();
+  console.log("Done!");
 }
 
 function getTools() {

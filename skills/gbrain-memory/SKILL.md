@@ -27,6 +27,9 @@ User input → Skill invoked → gbrain CLI → brain.db (permanent)
 # Store a fact
 gbrain put <slug> < content.md
 
+# Ingest markdown file(s) — each ## section becomes a chunk with metadata
+gbrain ingest <file1.md> [file2.md] ...
+
 # Retrieve
 gbrain get <slug>
 
