@@ -10,6 +10,23 @@ function getDb(): BrainDB {
   return new BrainDB(DB_PATH);
 }
 
+async function promptBackupSelection(backups: { name: string; path: string }[]): Promise<string | null> {
+  const readline = await import("readline");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+  return new Promise((resolve) => {
+    rl.question("Select backup number to restore: ", (answer) => {
+      rl.close();
+      const idx = parseInt(answer) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= backups.length) {
+        resolve(null);
+      } else {
+        resolve(backups[idx].path);
+      }
+    });
+  });
+}
+
 async function listBackups(): Promise<{ name: string; path: string; mtime: Date; size: number }[]> {
   const fs = await import("bun:fs");
   const pathModule = await import("path");
@@ -76,6 +93,60 @@ switch (command) {
         console.log(`  ${i + 1}. ${b.name}   ${dateStr}   ${sizeMB} MB`);
       });
     }
+    break;
+  }
+
+  case "restore": {
+    const fs = await import("bun:fs");
+    const pathModule = await import("path");
+    const dbPath = DB_PATH;
+    const targetFile = args[1];
+
+    let backupPath: string;
+
+    if (targetFile) {
+      // Direct path provided
+      if (!fs.existsSync(targetFile)) {
+        console.error(`Backup file not found: ${targetFile}`);
+        process.exit(1);
+      }
+      backupPath = targetFile;
+    } else {
+      // Interactive mode
+      const backups = await listBackups();
+      if (backups.length === 0) {
+        console.error("No backups found. Cannot restore.");
+        process.exit(1);
+      }
+
+      console.log("Available backups (most recent first):");
+      backups.forEach((b, i) => {
+        const sizeMB = (b.size / 1024 / 1024).toFixed(1);
+        const dateStr = b.mtime.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "");
+        console.log(`  ${i + 1}. ${b.name}   ${dateStr}   ${sizeMB} MB`);
+      });
+
+      const selected = await promptBackupSelection(backups);
+      if (!selected) {
+        console.error("Invalid selection.");
+        process.exit(1);
+      }
+      backupPath = selected;
+    }
+
+    // Pre-restore backup of current database
+    const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+/, "");
+    const preBackupName = pathModule.basename(dbPath) + "_backup_" + timestamp + ".db";
+    const preBackupPath = pathModule.join(pathModule.dirname(dbPath), preBackupName);
+
+    console.log("Creating pre-restore backup: " + preBackupPath);
+    await Bun.write(preBackupPath, await Bun.file(dbPath).arrayBuffer());
+
+    // Restore from backup
+    console.log("Restoring from: " + backupPath);
+    await Bun.write(dbPath, await Bun.file(backupPath).arrayBuffer());
+    console.log("Restore complete.");
+
     break;
   }
 
