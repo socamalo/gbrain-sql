@@ -25,6 +25,19 @@ switch (command) {
     break;
   }
 
+  case "backup": {
+    const fs = await import("bun:fs");
+    const pathModule = await import("path");
+    const dbPath = DB_PATH;
+    const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+/, "");
+    const backupName = pathModule.basename(dbPath) + "_backup_" + timestamp + ".db";
+    const backupPath = pathModule.join(pathModule.dirname(dbPath), backupName);
+
+    await Bun.write(backupPath, await Bun.file(dbPath).arrayBuffer());
+    console.log("Backup created: " + backupPath);
+    break;
+  }
+
   case "get": {
     const slug = args[1];
     if (!slug) {
