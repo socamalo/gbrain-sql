@@ -62,8 +62,13 @@ export function renderPage(
   const fm: Record<string, any> = { ...frontmatter, title, type };
   const fmYaml = stringifyYaml(fm);
 
-  // Build body
-  let body = `# ${title}\n\n${compiledTruth}`;
+  // Strip H1 from compiledTruth only if it matches title (to avoid duplicate)
+  const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const compiledBody = compiledTruth.replace(
+    new RegExp(`^#\\s+${escapedTitle}\\s*\\n+`, ''),
+    ''
+  );
+  let body = `# ${title}\n\n${compiledBody}`;
   if (timeline) {
     body += `\n\n---\n\n${timeline}`;
   }

@@ -49,7 +49,7 @@ switch (command) {
       console.error("Usage: gbrain put <slug> [< file.md]");
       process.exit(1);
     }
-    const content = args[2] || await readStdin();
+    const content = args[2] ? (args[2] === "-" ? await readStdin() : args[2]) : await readStdin();
     const parsed = parseMarkdownFile(content, slug);
     const db = getDb();
 
@@ -220,6 +220,40 @@ switch (command) {
     const db = getDb();
     const model = db.getConfig("embedding_model") || "qwen3-embedding:latest";
 
+    // Handle gbrain embed --all
+    if (slug === "--all") {
+      const pages = db.listPages(undefined, 10000);
+      let totalEmbedded = 0;
+      let totalChunks = 0;
+
+      console.log(`Embedding ${pages.length} pages...`);
+
+      for (const page of pages) {
+        const pageId = db.getPageId(page.slug)!;
+        db.deleteEmbeddingsForPage(pageId);
+
+        const fullContent = page.compiled_truth + "\n\n" + page.timeline;
+        const chunks = splitIntoChunks(fullContent);
+
+        for (const chunk of chunks) {
+          try {
+            const embeddingBytes = await embedToBytes(chunk.text, model);
+            db.insertEmbedding(pageId, chunk.index, chunk.text, embeddingBytes, model);
+            totalChunks++;
+          } catch (err) {
+            // Skip failed chunks
+          }
+        }
+        totalEmbedded++;
+        process.stdout.write(".");
+      }
+
+      console.log("");
+      console.log(`Done. ${totalEmbedded} pages, ${totalChunks} chunks embedded.`);
+      db.close();
+      break;
+    }
+
     // Handle gbrain embed --stale
     if (slug === "--stale") {
       const stalePages = db.getStalePages();
@@ -297,7 +331,7 @@ switch (command) {
       console.log("");
       console.log(`Done. ${slug}: ${chunks.length} chunks embedded.`);
     } else {
-      // Embed all pages
+      // No slug provided - embed all pages
       const pages = db.listPages(undefined, 10000);
       let totalEmbedded = 0;
       let totalChunks = 0;
