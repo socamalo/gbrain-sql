@@ -130,3 +130,4 @@ Reverse-chronological evidence. Never modified, only appended.
 1. Start of conversation: `gbrain get user/me`
 2. When user asks about their projects
 3. When making suggestions that should account for user preferences
+4. **When you don't know something: search memory first, then external search** — use the shortest core keywords (add more only if nothing is found)

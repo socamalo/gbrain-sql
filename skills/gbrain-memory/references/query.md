@@ -6,6 +6,7 @@ Answer questions from the brain using FTS5 + semantic search + structured querie
 
 1. **FTS5 keyword search** — `gbrain search "<query>"` — fast, exact matches.
    Best for: names, company names, specific terms.
+   ⚠️ **Search tip: use the shortest core term first.** Multi-keyword phrases fragment the FTS5 token score. Start with 1-2 words, escalate only if needed.
 
 2. **Semantic vector search** — `gbrain query "<question>"` — meaning-based.
    Best for: "who knows X?", "what's our thesis on Y?", conceptual questions.
