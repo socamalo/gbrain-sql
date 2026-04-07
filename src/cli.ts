@@ -16,6 +16,17 @@ function localTimestamp(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
 }
 
+async function createBackup(): Promise<string> {
+  const fs = await import("bun:fs");
+  const pathModule = await import("path");
+  const dbPath = DB_PATH;
+  const timestamp = localTimestamp();
+  const backupName = pathModule.basename(dbPath) + "_backup_" + timestamp + ".db";
+  const backupPath = pathModule.join(pathModule.dirname(dbPath), backupName);
+  await Bun.write(backupPath, await Bun.file(dbPath).arrayBuffer());
+  return backupPath;
+}
+
 function formatLocalDate(d: Date): string {
   const pad = (n: number) => n.toString().padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -357,6 +368,71 @@ switch (command) {
     break;
   }
 
+  case "delete": {
+    const slugs = args.slice(1);
+    if (slugs.length === 0) {
+      console.error("Usage: gbrain delete <slug> [<slug>...]");
+      process.exit(1);
+    }
+
+    const db = getDb();
+
+    // Backup before any deletion
+    const backupPath = await createBackup();
+    console.log("Backup created: " + backupPath);
+
+    // Check which slugs exist
+    const found: string[] = [];
+    const notFound: string[] = [];
+    for (const slug of slugs) {
+      if (db.getPage(slug)) {
+        found.push(slug);
+      } else {
+        notFound.push(slug);
+      }
+    }
+
+    if (found.length === 0) {
+      console.log("No pages found to delete.");
+      db.close();
+      process.exit(0);
+    }
+
+    // Multi-page: interactive confirmation
+    if (found.length > 1) {
+      console.log("The following pages will be deleted:");
+      for (const slug of found) {
+        console.log("  " + slug);
+      }
+      const readline = await import("readline");
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await new Promise<string>((resolve) => {
+        rl.question(`Delete ${found.length} pages? [y/N] `, resolve);
+      });
+      rl.close();
+      if (answer.toLowerCase() !== "y") {
+        console.log("Aborted.");
+        db.close();
+        process.exit(1);
+      }
+    }
+
+    // Delete
+    for (const slug of found) {
+      db.deletePage(slug);
+      console.log("Deleted: " + slug);
+    }
+
+    if (notFound.length > 0) {
+      for (const slug of notFound) {
+        console.warn("Warning: page not found: " + slug);
+      }
+    }
+
+    db.close();
+    break;
+  }
+
   case "embed": {
     const slug = args[1];
     const db = getDb();
@@ -546,6 +622,7 @@ Commands:
   gbrain embed [slug|--all]       Regenerate embeddings
   gbrain tags <slug>              Get tags for a page
   gbrain backlinks <slug>         Get pages linking to this page
+  gbrain delete <slug> [...]     Delete one or more pages (auto-backup first)
   gbrain stats                    Show brain statistics
   gbrain import <dir>             Import markdown files
   gbrain backup                  Create a timestamped backup of the database
