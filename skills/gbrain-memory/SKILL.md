@@ -38,6 +38,9 @@ gbrain query "<question>"      # semantic vector
 gbrain list --type <type>      # person, project, concept, etc.
 gbrain list --tag <tag>
 
+# Delete (auto-backup first)
+gbrain delete [-y] <slug>...   # -y skips confirmation prompt
+
 # Stats
 gbrain stats
 ```
@@ -48,6 +51,7 @@ gbrain stats
 |-----------|-------------|
 | **Ingest** | User shares meeting notes, article, doc, conversation |
 | **Query** | User asks a question from stored knowledge |
+| **Delete** | Remove stale, incorrect, or obsolete pages |
 | **Maintain** | Periodic cleanup: contradictions, stale info, orphans |
 | **Enrich** | External data lookup (LinkedIn, company info, etc.) |
 | **Briefing** | Compile summary of brain state |
@@ -60,6 +64,7 @@ See `references/` for complete documentation:
 |-----------|---------|
 | `references/ingest.md` | Ingest meetings, articles, docs |
 | `references/query.md` | Three-layer search: FTS5 + vector + structured |
+| `references/delete.md` | Remove pages safely with auto-backup |
 | `references/maintain.md` | Lint: contradictions, stale info, orphans |
 | `references/enrich.md` | External enrichment from APIs |
 | `references/briefing.md` | Compile daily briefings |
