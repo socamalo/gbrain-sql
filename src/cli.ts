@@ -140,7 +140,13 @@ switch (command) {
     const preBackupPath = pathModule.join(pathModule.dirname(dbPath), preBackupName);
 
     console.log("Creating pre-restore backup: " + preBackupPath);
-    await Bun.write(preBackupPath, await Bun.file(dbPath).arrayBuffer());
+    try {
+      await Bun.write(preBackupPath, await Bun.file(dbPath).arrayBuffer());
+    } catch (err) {
+      console.error("Failed to create pre-restore backup: " + (err instanceof Error ? err.message : err));
+      console.error("Aborting restore to prevent data loss.");
+      process.exit(1);
+    }
 
     // Restore from backup
     console.log("Restoring from: " + backupPath);
