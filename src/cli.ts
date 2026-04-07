@@ -10,6 +10,12 @@ function getDb(): BrainDB {
   return new BrainDB(DB_PATH);
 }
 
+function localTimestamp(): string {
+  const d = new Date();
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+}
+
 async function promptBackupSelection(backups: { name: string; path: string }[]): Promise<string | null> {
   const readline = await import("readline");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -67,7 +73,7 @@ switch (command) {
   case "backup": {
     const pathModule = await import("path");
     const dbPath = DB_PATH;
-    const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+/, "");
+    const timestamp = localTimestamp();
     const backupName = pathModule.basename(dbPath) + "_backup_" + timestamp + ".db";
     const backupPath = pathModule.join(pathModule.dirname(dbPath), backupName);
 
@@ -135,7 +141,7 @@ switch (command) {
     }
 
     // Pre-restore backup of current database
-    const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+/, "");
+    const timestamp = localTimestamp();
     const preBackupName = pathModule.basename(dbPath) + "_backup_" + timestamp + ".db";
     const preBackupPath = pathModule.join(pathModule.dirname(dbPath), preBackupName);
 
