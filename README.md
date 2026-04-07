@@ -19,15 +19,6 @@ GBrain is a personal knowledge management system built on the "compiled truth + 
 
 The knowledge layer to GStack's coding layer. Together: intelligence on tap.
 
-## Features
-
-- **Single-file database** — SQLite with FTS5 full-text search and vector embeddings. No servers, no Docker, no external services (except Ollama for embeddings).
-- **FTS5 + vector search** — Keyword search and semantic search in one query, zero network hops.
-- **Ollama embeddings** — Local embedding model (qwen3-embedding:latest, 4096 dimensions) via Ollama API. No API keys, no cloud costs.
-- **Auto-embedding** — Pages are automatically embedded on `put`. No separate embedding step needed.
-- **CLI + Skill** — Thin CLI harness, fat markdown skill files. Claude Code reads the skill and uses the CLI to interact with the brain.
-- **Lossless migration** — Import existing markdown directories and export back. Every byte preserved.
-
 ## Architecture
 
 ```
@@ -42,13 +33,13 @@ The knowledge layer to GStack's coding layer. Together: intelligence on tap.
 │                           │                             │
 │                           ▼                             │
 │  ┌─────────────────────────────────────────────────┐   │
-│  │  gbrain CLI (bun src/cli.ts)                   │   │
+│  │  gbrain CLI (thin harness)                     │   │
 │  └─────────────────────────────────────────────────┘   │
 │                           │                             │
 │                           ▼                             │
 │  ┌─────────────────────────────────────────────────┐   │
 │  │  SQLite brain.db                                │   │
-│  │  pages | page_fts | page_embeddings | links     │   │
+│  │  pages | page_fts | page_embeddings | links   │   │
 │  └─────────────────────────────────────────────────┘   │
 │                           │                             │
 │                           ▼                             │
@@ -59,37 +50,60 @@ The knowledge layer to GStack's coding layer. Together: intelligence on tap.
 └─────────────────────────────────────────────────────────┘
 ```
 
-## Prerequisites
+**Skills are the brain. CLI is just the hands.** The intelligence lives in markdown skill files. Claude Code reads the skill and uses the CLI to interact with the brain — but the skill defines the behavior, not the code.
 
-- [bun](https://bun.sh) runtime installed
-- [Ollama](https://ollama.com) installed (for embeddings)
+## Skills (Fat Markdown)
 
-### Install Ollama and embedding model
+Skills are the core of GBrain. They define HOW to work with the brain — not as code, but as markdown documents that Claude Code reads and follows.
+
+### Available Skills
+
+| Skill | Purpose |
+|-------|---------|
+| `gbrain-memory` | Permanent memory: ingest, query, maintain |
+| `references/ingest.md` | Ingest meetings, articles, docs |
+| `references/query.md` | Three-layer search: FTS5 + vector + structured |
+| `references/maintain.md` | Lint: contradictions, stale info, orphans |
+| `references/enrich.md` | External enrichment (LinkedIn, company data) |
+| `references/briefing.md` | Compile daily briefings |
+
+### Core Memory Slugs
+
+| Slug | Content |
+|------|---------|
+| `user/me` | Facts about you (name, role, background) |
+| `user/projects` | Active projects and their goals |
+| `user/context` | Current session context and ongoing work |
+| `user/preferences` | How you like to work (tools, communication style) |
+| `feedback/*` | Lessons learned from past feedback |
+| `reference/*` | Pointers to external systems (Linear, Grafana, etc.) |
+
+### Quick Commands
 
 ```bash
-# Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
+# Retrieve
+gbrain get user/me
 
-# Pull embedding model
-ollama pull qwen3-embedding:latest
+# Store a fact
+gbrain put user/me << 'EOF'
+# My Profile
+> Current understanding of me.
+
+## State
+- Name: Daniel
+- Working on: GBrain
+EOF
+
+# Full-text search
+gbrain search "preferences"
+
+# Semantic search
+gbrain query "what projects am I working on"
 ```
 
-## Install
+## CLI (Thin Harness)
 
-```bash
-git clone https://github.com/socamalo/gbrain.git
-cd gbrain
-bun install
-bun link
-```
-
-**Important:** Set the `GBRAIN_DB` environment variable to the brain.db path:
-
-```bash
-export GBRAIN_DB=/path/to/gbrain/brain.db  # Add to ~/.zshrc
-```
-
-## CLI Usage
+The CLI is intentionally thin — it just moves data. All intelligence comes from skills.
 
 ```bash
 # Initialize (first time only)
@@ -97,6 +111,10 @@ gbrain init
 
 # Add a page (auto-embeds on put)
 gbrain put people/elon-musk < elon.md
+
+# Ingest one or more markdown files (each ## section becomes a chunk with metadata)
+gbrain ingest article.md
+gbrain ingest doc1.md doc2.md doc3.md
 
 # Retrieve a page
 gbrain get people/elon-musk
@@ -120,11 +138,21 @@ gbrain stats
 
 # Bulk import markdown files
 gbrain import ./notes/
-
-# Ingest one or more markdown files (each ## section becomes a chunk with metadata)
-gbrain ingest article.md
-gbrain ingest doc1.md doc2.md doc3.md
 ```
+
+### CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `gbrain get <slug>` | Get a page by slug |
+| `gbrain put <slug> < file.md` | Create/update a page (auto-embeds) |
+| `gbrain ingest <file1.md> [file2.md] ...` | Ingest one or more markdown files (with chunk metadata) |
+| `gbrain search "<query>"` | Full-text search (FTS5) |
+| `gbrain query "<question>"` | Semantic search (vector) |
+| `gbrain list [--type <type>]` | List pages with optional filter |
+| `gbrain stats` | Get brain statistics |
+| `gbrain tags <slug>` | Get tags for a page |
+| `gbrain backlinks <slug>` | Get pages linking to a page |
 
 ## Claude Code Memory Integration
 
@@ -173,53 +201,35 @@ When you encounter names, projects, decisions, or requirements — first ask you
 
 This configuration ensures Claude Code treats memory as a first-class tool — not an afterthought, but a proactive part of every session.
 
-### Core Memory Slugs
+## Prerequisites
 
-| Slug | Content |
-|------|---------|
-| `user/me` | Facts about you (name, role, background) |
-| `user/projects` | Active projects and their goals |
-| `user/context` | Current session context and ongoing work |
-| `user/preferences` | How you like to work (tools, communication style) |
-| `feedback/*` | Lessons learned from past feedback |
-| `reference/*` | Pointers to external systems (Linear, Grafana, etc.) |
+- [bun](https://bun.sh) runtime installed
+- [Ollama](https://ollama.com) installed (for embeddings)
 
-### Quick Commands
+### Install Ollama and embedding model
 
 ```bash
-# Retrieve
-gbrain get user/me
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
 
-# Store a fact
-gbrain put user/me << 'EOF'
-# My Profile
-> Current understanding of me.
-
-## State
-- Name: Daniel
-- Working on: GBrain
-EOF
-
-# Full-text search
-gbrain search "preferences"
-
-# Semantic search
-gbrain query "what projects am I working on"
+# Pull embedding model
+ollama pull qwen3-embedding:latest
 ```
 
-## CLI Reference
+## Install
 
-| Command | Description |
-|---------|-------------|
-| `gbrain get <slug>` | Get a page by slug |
-| `gbrain put <slug> < file.md` | Create/update a page (auto-embeds) |
-| `gbrain ingest <file1.md> [file2.md] ...` | Ingest one or more markdown files (with chunk metadata) |
-| `gbrain search "<query>"` | Full-text search (FTS5) |
-| `gbrain query "<question>"` | Semantic search (vector) |
-| `gbrain list [--type <type>]` | List pages with optional filter |
-| `gbrain stats` | Get brain statistics |
-| `gbrain tags <slug>` | Get tags for a page |
-| `gbrain backlinks <slug>` | Get pages linking to a page |
+```bash
+git clone https://github.com/socamalo/gbrain.git
+cd gbrain
+bun install
+bun link
+```
+
+**Important:** Set the `GBRAIN_DB` environment variable to the brain.db path:
+
+```bash
+export GBRAIN_DB=/path/to/gbrain/brain.db  # Add to ~/.zshrc
+```
 
 ## Project Structure
 
