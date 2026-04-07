@@ -1,5 +1,9 @@
 # GBrain
 
+[![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![bun](https://img.shields.io/badge/bun-v1.3+-f9f2f4?logo=bun)](https://bun.sh)
+[![Ollama](https://img.shields.io/badge/Ollama-11434-blue?logo=ollama)](https://ollama.com)
+
 > Open-source personal knowledge brain. SQLite + FTS5 + vector embeddings in one file. Thin CLI harness, fat skill files.
 
 ## Inspired by Garry Tan
