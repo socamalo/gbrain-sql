@@ -291,6 +291,14 @@ export class BrainDB {
     this.db.prepare("DELETE FROM page_embeddings WHERE page_id = ?").run(pageId);
   }
 
+  // Delete a page and all its children (cascades via FK + FTS trigger)
+  deletePage(slug: string): boolean {
+    const pageId = this.getPageId(slug);
+    if (!pageId) return false;
+    this.db.prepare("DELETE FROM pages WHERE id = ?").run(pageId);
+    return true;
+  }
+
   // Get all embeddings for a page
   getEmbeddingsForPage(pageId: number): { chunk_index: number; chunk_text: string; embedding: Blob; model: string }[] {
     return this.db.prepare(
