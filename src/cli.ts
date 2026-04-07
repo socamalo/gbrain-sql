@@ -375,9 +375,11 @@ switch (command) {
   }
 
   case "delete": {
-    const slugs = args.slice(1);
+    const rawArgs = args.slice(1);
+    const skipConfirm = rawArgs.includes("-y") || rawArgs.includes("--yes");
+    const slugs = rawArgs.filter(a => !a.startsWith("-"));
     if (slugs.length === 0) {
-      console.error("Usage: gbrain delete <slug> [<slug>...]");
+      console.error("Usage: gbrain delete [-y|--yes] <slug> [<slug>...]");
       process.exit(1);
     }
 
@@ -404,8 +406,8 @@ switch (command) {
       process.exit(0);
     }
 
-    // Multi-page: interactive confirmation
-    if (found.length > 1) {
+    // Multi-page: interactive confirmation (skip with -y)
+    if (found.length > 1 && !skipConfirm) {
       console.log("The following pages will be deleted:");
       for (const slug of found) {
         console.log("  " + slug);
@@ -628,7 +630,7 @@ Commands:
   gbrain embed [slug|--all]       Regenerate embeddings
   gbrain tags <slug>              Get tags for a page
   gbrain backlinks <slug>         Get pages linking to this page
-  gbrain delete <slug> [...]     Delete one or more pages (auto-backup first)
+  gbrain delete [-y|--yes] <slug> [...]  Delete pages (auto-backup first)
   gbrain stats                    Show brain statistics
   gbrain import <dir>             Import markdown files
   gbrain backup                  Create a timestamped backup of the database
