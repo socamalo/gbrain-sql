@@ -537,6 +537,9 @@ Commands:
   gbrain backlinks <slug>         Get pages linking to this page
   gbrain stats                    Show brain statistics
   gbrain import <dir>             Import markdown files
+  gbrain backup                  Create a timestamped backup of the database
+  gbrain backups                 List all available backups
+  gbrain restore [file]          Restore from a backup (interactive if no file specified)
   gbrain --tools-json            Show Claude Code tools
   gbrain --help                   Show this help
 
