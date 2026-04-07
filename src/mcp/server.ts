@@ -9,6 +9,7 @@ import {
 import { BrainDB } from "../core/db";
 import { renderPage } from "../core/markdown";
 import { parseMarkdownFile } from "../core/markdown.js";
+import { splitIntoChunks, embedToBytes } from "../core/embeddings";
 
 const DB_PATH = process.env.GBRAIN_DB || "./brain.db";
 
@@ -111,7 +112,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       case "brain_put": {
         const parsed = parseMarkdownFile(args.content, args.slug);
+        let pageId = db.getPageId(parsed.slug);
         db.putPage(parsed.slug, parsed.type, parsed.title, parsed.compiled_truth, parsed.timeline, parsed.frontmatter);
+        pageId = db.getPageId(parsed.slug)!;
+
+        // Auto-embed content chunks
+        const fullContent = parsed.compiled_truth + "\n\n" + parsed.timeline;
+        const chunks = splitIntoChunks(fullContent);
+
+        db.deleteEmbeddingsForPage(pageId);
+
+        if (chunks.length > 0) {
+          const model = db.getConfig("embedding_model") || "qwen3-embedding:latest";
+          let embeddedCount = 0;
+
+          for (const chunk of chunks) {
+            try {
+              const embeddingBytes = await embedToBytes(chunk.text, model);
+              db.insertEmbedding(pageId, chunk.index, chunk.text, embeddingBytes, model);
+              embeddedCount++;
+            } catch (err) {
+              // Skip failed chunks
+            }
+          }
+          return { content: [{ type: "text", text: `Saved: ${args.slug} (${embeddedCount}/${chunks.length} chunks embedded)` }] };
+        }
         return { content: [{ type: "text", text: `Saved: ${args.slug}` }] };
       }
       case "brain_list": {

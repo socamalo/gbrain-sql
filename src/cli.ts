@@ -1,5 +1,7 @@
+#!/usr/bin/env bun
 import { BrainDB } from "./core/db";
 import { parseMarkdownFile, renderPage, extractLinks, slugFromPath } from "./core/markdown";
+import { splitIntoChunks, embedToBytes, embed } from "./core/embeddings";
 import matter from "gray-matter";
 
 const DB_PATH = process.env.GBRAIN_DB || "./brain.db";
@@ -15,8 +17,8 @@ switch (command) {
   case "init": {
     const db = getDb();
     db.setConfig("version", "1");
-    db.setConfig("embedding_model", "text-embedding-3-small");
-    db.setConfig("embedding_dimensions", "1536");
+    db.setConfig("embedding_model", "qwen3-embedding:latest");
+    db.setConfig("embedding_dimensions", "4096");
     db.setConfig("chunk_strategy", "section");
     console.log(`Initialized brain.db at ${DB_PATH}`);
     db.close();
@@ -50,8 +52,41 @@ switch (command) {
     const content = args[2] || await readStdin();
     const parsed = parseMarkdownFile(content, slug);
     const db = getDb();
+
+    // Get page ID (for embeddings)
+    let pageId = db.getPageId(parsed.slug);
+
+    // Save the page
     db.putPage(parsed.slug, parsed.type, parsed.title, parsed.compiled_truth, parsed.timeline, parsed.frontmatter);
-    console.log(`Saved: ${parsed.slug}`);
+
+    // Get page ID after put (may have changed)
+    pageId = db.getPageId(parsed.slug)!;
+
+    // Delete old embeddings
+    db.deleteEmbeddingsForPage(pageId);
+
+    // Auto-embed content chunks
+    const fullContent = parsed.compiled_truth + "\n\n" + parsed.timeline;
+    const chunks = splitIntoChunks(fullContent);
+
+    if (chunks.length > 0) {
+      const model = db.getConfig("embedding_model") || "qwen3-embedding:latest";
+      let embeddedCount = 0;
+
+      for (const chunk of chunks) {
+        try {
+          const embeddingBytes = await embedToBytes(chunk.text, model);
+          db.insertEmbedding(pageId, chunk.index, chunk.text, embeddingBytes, model);
+          embeddedCount++;
+        } catch (err) {
+          console.warn(`  Warning: failed to embed chunk ${chunk.index}: ${err}`);
+        }
+      }
+      console.log(`Saved: ${parsed.slug} (${embeddedCount}/${chunks.length} chunks embedded)`);
+    } else {
+      console.log(`Saved: ${parsed.slug}`);
+    }
+
     db.close();
     break;
   }
@@ -84,6 +119,44 @@ switch (command) {
     if (results.length === 0) {
       console.log("No results found.");
     }
+    db.close();
+    break;
+  }
+
+  case "query": {
+    const question = args[1];
+    if (!question) {
+      console.error("Usage: gbrain query <question>");
+      process.exit(1);
+    }
+    const db = getDb();
+    const limit = parseInt(args.find(a => a === "--limit") ? args[args.indexOf("--limit") + 1] : "10");
+
+    console.log(`Searching for: "${question}"`);
+    console.log("");
+
+    try {
+      // Embed the question
+      const model = db.getConfig("embedding_model") || "qwen3-embedding:latest";
+      const queryEmbedding = await embed(question, model);
+
+      // Search semantic
+      const results = db.searchSemantic(queryEmbedding, limit);
+
+      if (results.length === 0) {
+        console.log("No semantic results found.");
+      } else {
+        console.log("Semantic results:");
+        for (const r of results) {
+          console.log(`  ${r.title} (${r.type}) - similarity: ${(r.similarity * 100).toFixed(1)}%`);
+          console.log(`    ${r.chunk_text.substring(0, 150).replace(/\n/g, " ")}...`);
+          console.log("");
+        }
+      }
+    } catch (err) {
+      console.error(`Error: ${err}`);
+    }
+
     db.close();
     break;
   }
@@ -142,6 +215,74 @@ switch (command) {
     break;
   }
 
+  case "embed": {
+    const slug = args[1];
+    const db = getDb();
+    const model = db.getConfig("embedding_model") || "qwen3-embedding:latest";
+
+    if (slug) {
+      // Embed single page
+      const page = db.getPage(slug);
+      if (!page) {
+        console.error(`Page not found: ${slug}`);
+        db.close();
+        process.exit(1);
+      }
+
+      const pageId = db.getPageId(slug)!;
+      db.deleteEmbeddingsForPage(pageId);
+
+      const fullContent = page.compiled_truth + "\n\n" + page.timeline;
+      const chunks = splitIntoChunks(fullContent);
+
+      console.log(`Embedding ${chunks.length} chunks for ${slug}...`);
+      for (const chunk of chunks) {
+        try {
+          const embeddingBytes = await embedToBytes(chunk.text, model);
+          db.insertEmbedding(pageId, chunk.index, chunk.text, embeddingBytes, model);
+          process.stdout.write(".");
+        } catch (err) {
+          process.stdout.write("x");
+        }
+      }
+      console.log("");
+      console.log(`Done. ${slug}: ${chunks.length} chunks embedded.`);
+    } else {
+      // Embed all pages
+      const pages = db.listPages(undefined, 10000);
+      let totalEmbedded = 0;
+      let totalChunks = 0;
+
+      console.log(`Embedding ${pages.length} pages...`);
+
+      for (const page of pages) {
+        const pageId = db.getPageId(page.slug)!;
+        db.deleteEmbeddingsForPage(pageId);
+
+        const fullContent = page.compiled_truth + "\n\n" + page.timeline;
+        const chunks = splitIntoChunks(fullContent);
+
+        for (const chunk of chunks) {
+          try {
+            const embeddingBytes = await embedToBytes(chunk.text, model);
+            db.insertEmbedding(pageId, chunk.index, chunk.text, embeddingBytes, model);
+            totalChunks++;
+          } catch (err) {
+            // Skip failed chunks
+          }
+        }
+        totalEmbedded++;
+        process.stdout.write(".");
+      }
+
+      console.log("");
+      console.log(`Done. ${totalEmbedded} pages, ${totalChunks} chunks embedded.`);
+    }
+
+    db.close();
+    break;
+  }
+
   case "serve": {
     const { startServer } = await import("./mcp/server.js");
     await startServer();
@@ -173,9 +314,11 @@ GBrain - Personal Knowledge Brain
 Commands:
   gbrain init <path>              Initialize a new brain.db
   gbrain get <slug>               Get a page by slug
-  gbrain put <slug> [file.md]     Create or update a page
+  gbrain put <slug> [file.md]     Create or update a page (auto-embeds)
   gbrain list [--type <type>]     List pages
-  gbrain search <query>           Full-text search
+  gbrain search <query>           Full-text search (FTS5)
+  gbrain query <question>         Semantic search (vector)
+  gbrain embed [slug|--all]       Regenerate embeddings
   gbrain tags <slug>              Get tags for a page
   gbrain backlinks <slug>         Get pages linking to this page
   gbrain stats                    Show brain statistics
@@ -195,7 +338,7 @@ async function readStdin(): Promise<string> {
 async function importDir(dir: string) {
   const db = getDb();
   const fs = await import("fs");
-  const path = await import("path");
+  const pathModule = await import("path");
 
   // Find all .md files recursively
   const files: string[] = [];
@@ -203,9 +346,9 @@ async function importDir(dir: string) {
     const entries = fs.readdirSync(d, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        walk(path.join(d, entry.name));
+        walk(pathModule.join(d, entry.name));
       } else if (entry.name.endsWith(".md") && entry.name !== "schema.md" && entry.name !== "index.md" && entry.name !== "log.md" && entry.name !== "README.md") {
-        files.push(path.join(d, entry.name));
+        files.push(pathModule.join(d, entry.name));
       }
     }
   }
@@ -213,9 +356,10 @@ async function importDir(dir: string) {
 
   console.log(`Importing ${files.length} files...`);
 
+  // First pass: import all pages
   for (const file of files) {
     const content = fs.readFileSync(file, "utf-8");
-    const relPath = path.relative(dir, file).replace(/\\/g, "/");
+    const relPath = pathModule.relative(dir, file).replace(/\\/g, "/");
     const parsed = parseMarkdownFile(content, relPath);
 
     const pageId = db.insertPageBulk(parsed.slug, parsed.type, parsed.title, parsed.compiled_truth, parsed.timeline, JSON.stringify(parsed.frontmatter));
@@ -227,11 +371,42 @@ async function importDir(dir: string) {
         db.insertTag(pageId, tag);
       }
     }
+  }
 
-    // Extract and insert links
+  // Second pass: resolve slugs and insert links
+  const slugToId = db.getAllSlugs();
+  for (const file of files) {
+    const content = fs.readFileSync(file, "utf-8");
+    const relPath = pathModule.relative(dir, file).replace(/\\/g, "/");
+    const parsed = parseMarkdownFile(content, relPath);
+    const fromId = slugToId.get(parsed.slug);
+    if (!fromId) continue;
+
     const links = extractLinks(parsed.compiled_truth + "\n" + parsed.timeline);
     for (const link of links) {
-      db.insertLink(pageId, link.target, "");
+      // Resolve relative path based on current page's directory
+      let targetSlug = link.target;
+      const pageDir = pathModule.dirname(parsed.slug);
+      if (targetSlug.startsWith("./")) {
+        // Relative to current directory
+        targetSlug = pageDir ? pageDir + "/" + targetSlug.substring(2) : targetSlug.substring(2);
+      } else if (targetSlug.startsWith("../")) {
+        // Go up directories
+        let remaining = targetSlug.substring(3);
+        let currentDir = pageDir;
+        while (remaining.startsWith("../")) {
+          currentDir = pathModule.dirname(currentDir);
+          remaining = remaining.substring(3);
+        }
+        targetSlug = currentDir ? currentDir + "/" + remaining : remaining;
+      }
+      // Remove .md if still present (shouldn't be, but just in case)
+      targetSlug = targetSlug.replace(/\.md$/, "");
+
+      const toId = slugToId.get(targetSlug);
+      if (toId) {
+        db.insertLink(fromId, toId, link.text);
+      }
     }
   }
 

@@ -272,4 +272,87 @@ export class BrainDB {
     const rows = this.db.prepare("SELECT tag FROM tags WHERE page_id = ?").all(pageId) as { tag: string }[];
     return rows.map(r => r.tag);
   }
+
+  // ============================================================
+  // Embeddings
+  // ============================================================
+
+  // Insert a single embedding
+  insertEmbedding(pageId: number, chunkIndex: number, chunkText: string, embeddingBytes: Uint8Array, model: string): void {
+    this.db.prepare(`
+      INSERT INTO page_embeddings (page_id, chunk_index, chunk_text, embedding, model)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(pageId, chunkIndex, chunkText, embeddingBytes, model);
+  }
+
+  // Delete all embeddings for a page (for re-embedding on update)
+  deleteEmbeddingsForPage(pageId: number): void {
+    this.db.prepare("DELETE FROM page_embeddings WHERE page_id = ?").run(pageId);
+  }
+
+  // Get all embeddings for a page
+  getEmbeddingsForPage(pageId: number): { chunk_index: number; chunk_text: string; embedding: Blob; model: string }[] {
+    return this.db.prepare(
+      "SELECT chunk_index, chunk_text, embedding, model FROM page_embeddings WHERE page_id = ? ORDER BY chunk_index"
+    ).all(pageId) as any[];
+  }
+
+  // Search semantic: find pages with highest similarity to query embedding
+  searchSemantic(queryEmbedding: Float32Array, limit = 10): { page_id: number; slug: string; title: string; type: string; similarity: number; chunk_text: string }[] {
+    // Load all embeddings and compute similarity in JS (O(n) scan, fine for personal brain scale)
+    const rows = this.db.prepare(`
+      SELECT pe.page_id, pe.chunk_text, pe.embedding, p.slug, p.title, p.type
+      FROM page_embeddings pe
+      JOIN pages p ON pe.page_id = p.id
+    `).all() as any[];
+
+    const results: { page_id: number; slug: string; title: string; type: string; similarity: number; chunk_text: string }[] = [];
+
+    for (const row of rows) {
+      // Convert Blob back to Float32Array
+      const bytes = new Uint8Array(row.embedding);
+      const floats = new Float32Array(bytes.buffer);
+      const similarity = cosineSimilarityJs(queryEmbedding, floats);
+
+      results.push({
+        page_id: row.page_id,
+        slug: row.slug,
+        title: row.title,
+        type: row.type,
+        similarity,
+        chunk_text: row.chunk_text,
+      });
+    }
+
+    // Sort by similarity descending
+    results.sort((a, b) => b.similarity - a.similarity);
+
+    return results.slice(0, limit);
+  }
+
+  // Get all embeddings count
+  getEmbeddingCount(): number {
+    const row = this.db.prepare("SELECT COUNT(*) as count FROM page_embeddings").get() as { count: number };
+    return row.count;
+  }
+}
+
+// Cosine similarity for JS (avoid importing from embeddings.ts to keep db.ts clean)
+function cosineSimilarityJs(a: Float32Array, b: Float32Array): number {
+  if (a.length !== b.length) return 0;
+
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+
+  for (let i = 0; i < a.length; i++) {
+    dotProduct += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  if (denom === 0) return 0;
+
+  return dotProduct / denom;
 }
