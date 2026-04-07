@@ -122,41 +122,70 @@ gbrain stats
 gbrain import ./notes/
 ```
 
-## Claude Code Skill Configuration
+## Claude Code Memory Integration
 
-GBrain uses Claude Code's skill system for memory. The skill is located at `skills/gbrain-memory/` and provides permanent memory storage.
+GBrain provides a permanent memory skill that survives session boundaries. Unlike session context which is lost when Claude Code exits, gbrain stores knowledge indefinitely and loads it at the start of every new conversation.
 
 ### Setup
 
 ```bash
-# The skill directory structure:
-# skills/gbrain-memory/
-# ├── SKILL.md          # Entry point, quick reference
-# └── references/       # Detailed documentation
-#     ├── ingest.md
-#     ├── query.md
-#     ├── maintain.md
-#     ├── enrich.md
-#     └── briefing.md
-
 # Link the skill to Claude Code's skills directory
 ln -s /path/to/gbrain/skills/gbrain-memory ~/.claude/skills/gbrain-memory
 ```
 
 After restarting Claude Code, invoke with `/gbrain-memory`.
 
-### Memory Slugs
+### Proactive Memory Usage (CLAUDE.md / AGENTS.md)
+
+To make Claude Code proactively use memory, add the following to your global `~/.claude/CLAUDE.md` or project-level `AGENTS.md`:
+
+```markdown
+## Memory
+
+**Before acting, always check memory first.** Permanent memory is a collection of past experiences.
+
+When you encounter names, projects, decisions, or requirements — first ask yourself: have I seen this before?
+
+- Invoke the `gbrain-memory` skill to interact with permanent memory
+- Use `gbrain get <slug>` to retrieve known facts
+- Use `gbrain search "<query>"` to find relevant past context
+- Use `gbrain put <slug> < content.md` to store new knowledge
+
+### When to Write to Memory
+
+1. User introduces themselves or shares a fact about who they are
+2. User expresses a preference or working style
+3. A project goal or deadline is mentioned
+4. User gives feedback on how to approach work
+5. Anything that would be useful in future sessions
+
+### When to Read from Memory
+
+1. Start of conversation: retrieve `user/me`, `user/projects`, `user/preferences`
+2. When user asks about their projects or prior work
+3. When making suggestions that should account for user preferences
+4. When encountering names or terms you're unsure about
+```
+
+This configuration ensures Claude Code treats memory as a first-class tool — not an afterthought, but a proactive part of every session.
+
+### Core Memory Slugs
 
 | Slug | Content |
 |------|---------|
-| `user/me` | Facts about you |
-| `user/projects` | Active projects |
-| `user/context` | Current session context |
-| `user/preferences` | How you like to work |
+| `user/me` | Facts about you (name, role, background) |
+| `user/projects` | Active projects and their goals |
+| `user/context` | Current session context and ongoing work |
+| `user/preferences` | How you like to work (tools, communication style) |
+| `feedback/*` | Lessons learned from past feedback |
+| `reference/*` | Pointers to external systems (Linear, Grafana, etc.) |
 
-### Example Usage
+### Quick Commands
 
 ```bash
+# Retrieve
+gbrain get user/me
+
 # Store a fact
 gbrain put user/me << 'EOF'
 # My Profile
@@ -167,11 +196,11 @@ gbrain put user/me << 'EOF'
 - Working on: GBrain
 EOF
 
-# Retrieve
-gbrain get user/me
-
-# Search
+# Full-text search
 gbrain search "preferences"
+
+# Semantic search
+gbrain query "what projects am I working on"
 ```
 
 ## CLI Reference

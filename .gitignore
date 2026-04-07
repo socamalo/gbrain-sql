@@ -34,9 +34,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .DS_Store
 
 # brain database
-brain.db
-brain.db-shm
-brain.db-wal
+*.db
+*.db-shm
+*.db-wal
 
 # docs (generated)
 docs/
