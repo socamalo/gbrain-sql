@@ -63,6 +63,7 @@ See `references/` for complete documentation:
 | `references/maintain.md` | Lint: contradictions, stale info, orphans |
 | `references/enrich.md` | External enrichment from APIs |
 | `references/briefing.md` | Compile daily briefings |
+| `references/db-management.md` | Backup and restore brain.db |
 
 ## Page Structure
 
