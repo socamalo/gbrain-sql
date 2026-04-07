@@ -26,7 +26,6 @@ switch (command) {
   }
 
   case "backup": {
-    const fs = await import("bun:fs");
     const pathModule = await import("path");
     const dbPath = DB_PATH;
     const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+/, "");
