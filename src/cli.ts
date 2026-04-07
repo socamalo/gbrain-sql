@@ -249,8 +249,14 @@ switch (command) {
     const type = args.find(a => a === "--type") ? args[args.indexOf("--type") + 1] : undefined;
     const limit = parseInt(args.find(a => a === "--limit") ? args[args.indexOf("--limit") + 1] : "100");
     const pages = db.listPages(type, limit);
-    for (const page of pages) {
-      console.log(`${page.type.padEnd(12)} ${page.slug}`);
+    if (pages.length === 0) {
+      console.log("No pages found.");
+    } else {
+      console.log("Slug                          Type");
+      console.log("------------------------------ ---------------");
+      for (const page of pages) {
+        console.log(`${page.slug.padEnd(28)} ${page.type}`);
+      }
     }
     db.close();
     break;
