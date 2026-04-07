@@ -10,6 +10,28 @@ function getDb(): BrainDB {
   return new BrainDB(DB_PATH);
 }
 
+async function listBackups(): Promise<{ name: string; path: string; mtime: Date; size: number }[]> {
+  const fs = await import("bun:fs");
+  const pathModule = await import("path");
+  const dbDir = pathModule.dirname(DB_PATH);
+  const dbBasename = pathModule.basename(DB_PATH);
+  const pattern = new RegExp("^" + dbBasename.replace(".", "\\.") + "_backup_\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}\\.db$");
+
+  try {
+    const files = fs.readdirSync(dbDir);
+    const backups = files
+      .filter(f => pattern.test(f))
+      .map(f => {
+        const stat = fs.statSync(pathModule.join(dbDir, f));
+        return { name: f, path: pathModule.join(dbDir, f), mtime: stat.mtime, size: stat.size };
+      })
+      .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+    return backups;
+  } catch {
+    return [];
+  }
+}
+
 const args = process.argv.slice(2);
 const command = args[0];
 
@@ -38,6 +60,21 @@ switch (command) {
     } catch (err) {
       console.error("Backup failed: " + (err instanceof Error ? err.message : err));
       process.exit(1);
+    }
+    break;
+  }
+
+  case "backups": {
+    const backups = await listBackups();
+    if (backups.length === 0) {
+      console.log("No backups found.");
+    } else {
+      console.log("Available backups (most recent first):");
+      backups.forEach((b, i) => {
+        const sizeMB = (b.size / 1024 / 1024).toFixed(1);
+        const dateStr = b.mtime.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "");
+        console.log(`  ${i + 1}. ${b.name}   ${dateStr}   ${sizeMB} MB`);
+      });
     }
     break;
   }
