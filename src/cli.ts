@@ -32,8 +32,13 @@ switch (command) {
     const backupName = pathModule.basename(dbPath) + "_backup_" + timestamp + ".db";
     const backupPath = pathModule.join(pathModule.dirname(dbPath), backupName);
 
-    await Bun.write(backupPath, await Bun.file(dbPath).arrayBuffer());
-    console.log("Backup created: " + backupPath);
+    try {
+      await Bun.write(backupPath, await Bun.file(dbPath).arrayBuffer());
+      console.log("Backup created: " + backupPath);
+    } catch (err) {
+      console.error("Backup failed: " + (err instanceof Error ? err.message : err));
+      process.exit(1);
+    }
     break;
   }
 
