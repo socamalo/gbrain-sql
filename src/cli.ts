@@ -16,6 +16,11 @@ function localTimestamp(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
 }
 
+function formatLocalDate(d: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 async function promptBackupSelection(backups: { name: string; path: string }[]): Promise<string | null> {
   const readline = await import("readline");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -95,7 +100,7 @@ switch (command) {
       console.log("Available backups (most recent first):");
       backups.forEach((b, i) => {
         const sizeMB = (b.size / 1024 / 1024).toFixed(1);
-        const dateStr = b.mtime.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "");
+        const dateStr = formatLocalDate(b.mtime);
         console.log(`  ${i + 1}. ${b.name}   ${dateStr}   ${sizeMB} MB`);
       });
     }
@@ -128,7 +133,7 @@ switch (command) {
       console.log("Available backups (most recent first):");
       backups.forEach((b, i) => {
         const sizeMB = (b.size / 1024 / 1024).toFixed(1);
-        const dateStr = b.mtime.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "");
+        const dateStr = formatLocalDate(b.mtime);
         console.log(`  ${i + 1}. ${b.name}   ${dateStr}   ${sizeMB} MB`);
       });
 
