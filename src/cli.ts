@@ -963,12 +963,22 @@ async function ingestFiles(files: string[]) {
 
 function getTools() {
   return [
-    { name: "brain_search", description: "FTS5 full-text search", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"] } },
+    { name: "brain_init", description: "Initialize a new brain.db", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { name: "brain_get", description: "Get a page by slug", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
-    { name: "brain_put", description: "Create or update a page", inputSchema: { type: "object", properties: { slug: { type: "string" }, content: { type: "string" } }, required: ["slug", "content"] } },
-    { name: "brain_list", description: "List pages", inputSchema: { type: "object", properties: { type: { type: "string" }, limit: { type: "number" } } } },
-    { name: "brain_stats", description: "Get brain statistics", inputSchema: { type: "object" } },
-    { name: "brain_tags", description: "Get page tags", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
-    { name: "brain_backlinks", description: "Get backlinks", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
+    { name: "brain_put", description: "Create or update a page (auto-embeds)", inputSchema: { type: "object", properties: { slug: { type: "string" }, content: { type: "string" } }, required: ["slug", "content"] } },
+    { name: "brain_note", description: "Quick capture with LLM-inferred metadata (type, title, tags, compiled_truth)", inputSchema: { type: "object", properties: { content: { type: "string" } }, required: ["content"] } },
+    { name: "brain_list", description: "List pages with optional type filter", inputSchema: { type: "object", properties: { type: { type: "string" }, limit: { type: "number" } } } },
+    { name: "brain_search", description: "Full-text search (FTS5)", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"] } },
+    { name: "brain_query", description: "Semantic search (vector embedding)", inputSchema: { type: "object", properties: { question: { type: "string" }, limit: { type: "number" } }, required: ["question"] } },
+    { name: "brain_embed", description: "Regenerate embeddings for a page or all pages", inputSchema: { type: "object", properties: { slug: { type: "string" }, all: { type: "boolean" } } } },
+    { name: "brain_tags", description: "Get tags for a page", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
+    { name: "brain_backlinks", description: "Get pages linking to a page", inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] } },
+    { name: "brain_delete", description: "Delete pages (auto-backup first)", inputSchema: { type: "object", properties: { slugs: { type: "array", items: { type: "string" } }, yes: { type: "boolean" } }, required: ["slugs"] } },
+    { name: "brain_stats", description: "Show brain statistics", inputSchema: { type: "object" } },
+    { name: "brain_import", description: "Bulk import markdown files from a directory", inputSchema: { type: "object", properties: { dir: { type: "string" } }, required: ["dir"] } },
+    { name: "brain_ingest", description: "Ingest one or more markdown files (with chunk metadata)", inputSchema: { type: "object", properties: { files: { type: "array", items: { type: "string" } } }, required: ["files"] } },
+    { name: "brain_backup", description: "Create a timestamped backup of the database", inputSchema: { type: "object" } },
+    { name: "brain_backups", description: "List all available backups", inputSchema: { type: "object" } },
+    { name: "brain_restore", description: "Restore from a backup", inputSchema: { type: "object", properties: { file: { type: "string" } } } },
   ];
 }
