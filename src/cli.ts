@@ -85,7 +85,7 @@ const command = args[0];
 
 // Handle --version before command switch
 if (command === "--version" || command === "-v") {
-  console.log("gbrain 0.2.0 (fixed db path: ~/gbrain/brain.db)");
+  console.log("gbrain 0.3.0 (note command, config.toml)");
   process.exit(0);
 }
 
@@ -270,7 +270,7 @@ switch (command) {
     const today = new Date();
     const dateStr = today.toISOString().split("T")[0]; // YYYY-MM-DD
 
-    // Call Ollama chat to infer metadata
+    // Call LLM to infer metadata via Anthropic API
     const prompt = `你是一个元数据推断助手。用户输入："${content.replace(/"/g, '\\"')}"
 
 请推断并返回以下 JSON（只返回 JSON，不要其他内容）：
@@ -282,31 +282,46 @@ switch (command) {
 }`;
 
     let llmResponse: { type: string; title: string; tags: string[]; compiled_truth: string };
+
+    // Check if API is configured
+    if (!cfg.api.base_url || !cfg.api.api_key || !cfg.api.model) {
+      console.error("Error: API not configured. Set [api] section in config.toml:");
+      console.error("  base_url = \"https://api.minimaxi.com/anthropic\"");
+      console.error("  api_key = \"env:MINIMAX_API_KEY\"");
+      console.error("  model = \"MiniMax-M2.7\"");
+      process.exit(1);
+    }
+
     try {
-      const response = await fetch(cfg.ollama.url + "/api/chat", {
+      const response = await fetch(cfg.api.base_url + "/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": cfg.api.api_key,
+          "anthropic-version": "2023-06-01",
+        },
         body: JSON.stringify({
-          model: cfg.ollama.chat_model,
-          messages: [{ role: "user", content: prompt }],
-          stream: false,
+          model: cfg.api.model,
+          max_tokens: 1024,
+          messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
         }),
       });
 
       if (!response.ok) {
-        throw new Error(`Ollama API error: ${response.status} ${response.statusText}`);
+        const errText = await response.text();
+        throw new Error(`API error ${response.status}: ${errText}`);
       }
 
-      const data = await response.json() as { message?: { content?: string } };
-      const rawContent = data.message?.content ?? "{}";
+      const data = await response.json() as { content?: { type?: string; text?: string }[] };
+      const textBlock = data.content?.find(c => c.type === "text");
+      const rawContent = textBlock?.text ?? "{}";
 
       // Extract JSON from response (handle markdown code blocks)
       const jsonMatch = rawContent.match(/```(?:json)?\s*([\s\S]*?)```/) ?? rawContent.match(/\{[\s\S]*\}/);
       const jsonStr = jsonMatch ? (jsonMatch[1] ?? jsonMatch[0]) : rawContent;
       llmResponse = JSON.parse(jsonStr);
     } catch (err) {
-      console.error("Error calling Ollama: " + (err instanceof Error ? err.message : err));
-      console.error("Make sure Ollama is running at " + cfg.ollama.url);
+      console.error("Error calling API: " + (err instanceof Error ? err.message : err));
       process.exit(1);
     }
 
@@ -743,7 +758,7 @@ switch (command) {
 
 function printHelp() {
   console.log(`
-GBrain v0.2.0 - Personal Knowledge Brain
+GBrain v0.3.0 - Personal Knowledge Brain
 
 Commands:
   gbrain init <path>              Initialize a new brain.db

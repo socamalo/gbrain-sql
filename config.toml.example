@@ -1,0 +1,8 @@
+[ollama]
+url = "http://localhost:11434"
+embedding_model = "qwen3-embedding:latest"
+
+[api]
+base_url = "https://api.minimaxi.com/anthropic"
+api_key = "env:MINIMAX_API_KEY"
+model = "MiniMax-M2.7"
