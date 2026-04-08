@@ -6,8 +6,7 @@
  * Response: { "embedding": number[] }
  */
 
-const OLLAMA_URL = "http://localhost:11434/api/embeddings";
-const DEFAULT_MODEL = "qwen3-embedding:latest";
+import { getConfig } from "./config";
 
 export interface Chunk {
   index: number;
@@ -25,11 +24,14 @@ export interface ChunkWithMeta {
 /**
  * Call Ollama embeddings API
  */
-export async function embed(text: string, model = DEFAULT_MODEL): Promise<Float32Array> {
-  const response = await fetch(OLLAMA_URL, {
+export async function embed(text: string, model?: string): Promise<Float32Array> {
+  const cfg = getConfig();
+  const url = cfg.ollama.url + "/api/embeddings";
+  const modelName = model ?? cfg.ollama.embedding_model;
+  const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, prompt: text }),
+    body: JSON.stringify({ model: modelName, prompt: text }),
   });
 
   if (!response.ok) {
@@ -187,7 +189,7 @@ function buildChunkText(
 /**
  * Embed a single chunk, returns the Float32Array bytes (for BLOB storage)
  */
-export async function embedToBytes(text: string, model = DEFAULT_MODEL): Promise<Uint8Array> {
+export async function embedToBytes(text: string, model?: string): Promise<Uint8Array> {
   const embedding = await embed(text, model);
   // Convert Float32Array to Uint8Array (bytes) for BLOB storage
   const bytes = new Uint8Array(embedding.buffer);
