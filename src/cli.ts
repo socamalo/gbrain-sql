@@ -6,6 +6,7 @@ import matter from "gray-matter";
 import os from "os";
 import path from "path";
 import { existsSync, mkdirSync } from "fs";
+import { getConfig } from "./core/config";
 
 const DEFAULT_DB = path.join(os.homedir(), "gbrain", "brain.db");
 const DB_PATH = process.env.GBRAIN_DB || DEFAULT_DB;
@@ -252,6 +253,106 @@ switch (command) {
       console.log(`Saved: ${parsed.slug} (${embeddedCount}/${chunks.length} chunks embedded)`);
     } else {
       console.log(`Saved: ${parsed.slug}`);
+    }
+
+    db.close();
+    break;
+  }
+
+  case "note": {
+    const content = args[1];
+    if (!content) {
+      console.error("Usage: gbrain note \"<content>\"");
+      process.exit(1);
+    }
+
+    const cfg = getConfig();
+    const today = new Date();
+    const dateStr = today.toISOString().split("T")[0]; // YYYY-MM-DD
+
+    // Call Ollama chat to infer metadata
+    const prompt = `你是一个元数据推断助手。用户输入："${content.replace(/"/g, '\\"')}"
+
+请推断并返回以下 JSON（只返回 JSON，不要其他内容）：
+{
+  "type": "页面类型，如 credential, note, project, person, book, idea 等",
+  "title": "简短标题，不超过30字",
+  "tags": ["tag1", "tag2", "tag3"],
+  "compiled_truth": "一句话摘要"
+}`;
+
+    let llmResponse: { type: string; title: string; tags: string[]; compiled_truth: string };
+    try {
+      const response = await fetch(cfg.ollama.url + "/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: cfg.ollama.chat_model,
+          messages: [{ role: "user", content: prompt }],
+          stream: false,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Ollama API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json() as { message?: { content?: string } };
+      const rawContent = data.message?.content ?? "{}";
+
+      // Extract JSON from response (handle markdown code blocks)
+      const jsonMatch = rawContent.match(/```(?:json)?\s*([\s\S]*?)```/) ?? rawContent.match(/\{[\s\S]*\}/);
+      const jsonStr = jsonMatch ? (jsonMatch[1] ?? jsonMatch[0]) : rawContent;
+      llmResponse = JSON.parse(jsonStr);
+    } catch (err) {
+      console.error("Error calling Ollama: " + (err instanceof Error ? err.message : err));
+      console.error("Make sure Ollama is running at " + cfg.ollama.url);
+      process.exit(1);
+    }
+
+    // Generate slug from title + date
+    const slugBase = llmResponse.title
+      .toLowerCase()
+      .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .substring(0, 40);
+    const slug = `${slugBase}-${dateStr}`;
+
+    const timeline = `### ${dateStr} | user | 创建页面\n- ${content}\n`;
+
+    const frontmatter = {
+      tags: llmResponse.tags,
+      created: dateStr,
+    };
+
+    const db = getDb();
+    db.putPage(slug, llmResponse.type, llmResponse.title, llmResponse.compiled_truth, timeline, frontmatter);
+
+    const pageId = db.getPageId(slug)!;
+    db.deleteEmbeddingsForPage(pageId);
+
+    const fullContent = llmResponse.compiled_truth + "\n\n" + timeline;
+    const chunks = splitIntoChunks(fullContent);
+
+    if (chunks.length > 0) {
+      let embeddedCount = 0;
+      for (const chunk of chunks) {
+        try {
+          const embeddingBytes = await embedToBytes(chunk.text, cfg.ollama.embedding_model);
+          db.insertEmbedding(pageId, chunk.index, chunk.text, embeddingBytes, cfg.ollama.embedding_model);
+          embeddedCount++;
+        } catch (err) {
+          console.warn(`  Warning: failed to embed chunk ${chunk.index}: ${err}`);
+        }
+      }
+      console.log(`Saved: ${slug} (${embeddedCount}/${chunks.length} chunks embedded)`);
+    } else {
+      console.log(`Saved: ${slug}`);
+    }
+
+    // Insert tags
+    for (const tag of llmResponse.tags) {
+      db.insertTag(pageId, tag);
     }
 
     db.close();
@@ -648,6 +749,7 @@ Commands:
   gbrain init <path>              Initialize a new brain.db
   gbrain get <slug>               Get a page by slug
   gbrain put <slug> [file.md]     Create or update a page (auto-embeds)
+  gbrain note "<content>"        Create a quick note with LLM-inferred metadata
   gbrain list [--type <type>]     List pages
   gbrain search <query>           Full-text search (FTS5)
   gbrain query <question>         Semantic search (vector)
