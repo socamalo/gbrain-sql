@@ -3,10 +3,18 @@ import { BrainDB } from "./core/db";
 import { parseMarkdownFile, renderPage, extractLinks, slugFromPath, extractAgenda, extractTitle } from "./core/markdown";
 import { splitIntoChunks, splitIntoChunksWithMeta, embedToBytes, embed } from "./core/embeddings";
 import matter from "gray-matter";
+import os from "os";
+import path from "path";
+import { existsSync, mkdirSync } from "fs";
 
-const DB_PATH = process.env.GBRAIN_DB || "./brain.db";
+const DEFAULT_DB = path.join(os.homedir(), "gbrain", "brain.db");
+const DB_PATH = process.env.GBRAIN_DB || DEFAULT_DB;
 
 function getDb(): BrainDB {
+  const dbDir = path.dirname(DB_PATH);
+  if (dbDir && dbDir !== "." && !existsSync(dbDir)) {
+    mkdirSync(dbDir, { recursive: true });
+  }
   return new BrainDB(DB_PATH);
 }
 
@@ -73,6 +81,12 @@ async function listBackups(): Promise<{ name: string; path: string; mtime: Date;
 
 const args = process.argv.slice(2);
 const command = args[0];
+
+// Handle --version before command switch
+if (command === "--version" || command === "-v") {
+  console.log("gbrain 0.2.0 (fixed db path: ~/gbrain/brain.db)");
+  process.exit(0);
+}
 
 switch (command) {
   case "init": {
@@ -628,7 +642,7 @@ switch (command) {
 
 function printHelp() {
   console.log(`
-GBrain - Personal Knowledge Brain
+GBrain v0.2.0 - Personal Knowledge Brain
 
 Commands:
   gbrain init <path>              Initialize a new brain.db

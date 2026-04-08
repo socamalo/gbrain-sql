@@ -10,8 +10,12 @@ import { BrainDB } from "../core/db";
 import { renderPage } from "../core/markdown";
 import { parseMarkdownFile } from "../core/markdown.js";
 import { splitIntoChunks, embedToBytes } from "../core/embeddings";
+import os from "os";
+import path from "path";
+import { existsSync, mkdirSync } from "fs";
 
-const DB_PATH = process.env.GBRAIN_DB || "./brain.db";
+const DEFAULT_DB = path.join(os.homedir(), "gbrain", "brain.db");
+const DB_PATH = process.env.GBRAIN_DB || DEFAULT_DB;
 
 const server = new Server(
   { name: "gbrain", version: "0.1.0" },
@@ -95,6 +99,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const dbDir = path.dirname(DB_PATH);
+  if (dbDir && dbDir !== "." && !existsSync(dbDir)) {
+    mkdirSync(dbDir, { recursive: true });
+  }
   const db = new BrainDB(DB_PATH);
   const { name, arguments: args } = request.params;
 
