@@ -70,6 +70,7 @@ Skills are the core of GBrain. They define HOW to work with the brain — not as
 | `references/maintain.md` | Lint: contradictions, stale info, orphans |
 | `references/enrich.md` | External enrichment (LinkedIn, company data) |
 | `references/briefing.md` | Compile daily briefings |
+| `references/note.md` | Quick capture with LLM-inferred metadata |
 
 ### Core Memory Slugs
 
@@ -116,6 +117,9 @@ gbrain init
 # Add a page (auto-embeds on put)
 gbrain put people/elon-musk < elon.md
 
+# Quick note with LLM-inferred metadata
+gbrain note "Daniel works at Anthropic on AI infra"
+
 # Ingest one or more markdown files (each ## section becomes a chunk with metadata)
 gbrain ingest article.md
 gbrain ingest doc1.md doc2.md doc3.md
@@ -150,6 +154,7 @@ gbrain import ./notes/
 |---------|-------------|
 | `gbrain get <slug>` | Get a page by slug |
 | `gbrain put <slug> < file.md` | Create/update a page (auto-embeds) |
+| `gbrain note "<content>"` | Quick capture with LLM-inferred metadata |
 | `gbrain ingest <file1.md> [file2.md] ...` | Ingest one or more markdown files (with chunk metadata) |
 | `gbrain search "<query>"` | Full-text search (FTS5) |
 | `gbrain query "<question>"` | Semantic search (vector) |
@@ -272,11 +277,27 @@ gbrain/
 
 ## Configuration
 
+`config.toml` in the project root is automatically found via `argv[1]` — works from any directory.
+
+```toml
+[ollama]
+url = "http://localhost:11434"
+embedding_model = "qwen3-embedding:latest"
+chat_model = "qwen3:latest"
+
+[api]
+base_url = "https://api.minimaxi.com/anthropic"
+api_key = "env:MINIMAX_API_KEY"
+model = "MiniMax-M2.7"
+```
+
 | Key | Default | Description |
 |-----|---------|-------------|
 | `embedding_model` | `qwen3-embedding:latest` | Ollama embedding model |
 | `embedding_dimensions` | `4096` | Embedding vector dimensions |
 | `chunk_strategy` | `section` | How content is split for embedding |
+
+Config is looked up via `argv[1]` (the CLI script path) — walk up from script dir to find project root with `config.toml`. Falls back to `~/.gbrain/config.toml`.
 
 ## Environment Variables
 

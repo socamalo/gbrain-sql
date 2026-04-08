@@ -72,6 +72,7 @@ See `references/` for complete documentation:
 | `references/enrich.md` | External enrichment from APIs |
 | `references/briefing.md` | Compile daily briefings |
 | `references/db-management.md` | Backup and restore brain.db |
+| `references/note.md` | Quick capture with LLM-inferred metadata |
 
 ## Page Structure
 

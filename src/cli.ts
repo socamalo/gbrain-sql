@@ -85,7 +85,7 @@ const command = args[0];
 
 // Handle --version before command switch
 if (command === "--version" || command === "-v") {
-  console.log("gbrain 0.3.1 (note command, config.toml, 8k max_tokens)");
+  console.log("gbrain 0.3.2 (argv[1]-based config lookup)");
   process.exit(0);
 }
 
@@ -758,7 +758,7 @@ switch (command) {
 
 function printHelp() {
   console.log(`
-GBrain v0.3.1 - Personal Knowledge Brain
+GBrain v0.3.2 - Personal Knowledge Brain
 
 Commands:
   gbrain init <path>              Initialize a new brain.db

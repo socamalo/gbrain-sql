@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
+import { homedir } from "os";
 
 export interface OllamaConfig {
   url: string;
@@ -42,16 +43,30 @@ function resolveEnvVar(value: string): string {
   return value;
 }
 
-export function loadConfig(): Config {
-  if (cachedConfig) return cachedConfig;
+function findProjectRoot(): string | null {
+  // argv[1] is the script path when running directly (e.g., node src/cli.ts note "...")
+  // It contains the path to cli.ts or the compiled entry point
+  const scriptPath = process.argv[1];
 
-  const configPath = join(process.cwd(), "config.toml");
-  if (!existsSync(configPath)) {
-    cachedConfig = DEFAULT_CONFIG;
-    return cachedConfig;
+  if (scriptPath && (scriptPath.includes("/") || scriptPath.includes("\\"))) {
+    // Script path given - walk up from its directory to find project root
+    let dir = dirname(scriptPath);
+
+    // Limit search depth to avoid infinite loops
+    for (let i = 0; i < 20; i++) {
+      if (existsSync(join(dir, "package.json"))) {
+        return dir;
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break; // Reached filesystem root
+      dir = parent;
+    }
   }
 
-  // Simple TOML parse — section-based line parser
+  return null;
+}
+
+function loadTomlConfig(configPath: string): Config {
   const content = readFileSync(configPath, "utf-8");
   const config: Config = JSON.parse(JSON.stringify(DEFAULT_CONFIG)); // deep clone
 
@@ -80,8 +95,31 @@ export function loadConfig(): Config {
     }
   }
 
-  cachedConfig = config;
   return config;
+}
+
+export function loadConfig(): Config {
+  if (cachedConfig) return cachedConfig;
+
+  // Try to find config.toml from project directory via argv[1]
+  const projectRoot = findProjectRoot();
+  if (projectRoot) {
+    const configPath = join(projectRoot, "config.toml");
+    if (existsSync(configPath)) {
+      cachedConfig = loadTomlConfig(configPath);
+      return cachedConfig;
+    }
+  }
+
+  // Fallback to ~/.gbrain/config.toml
+  const configPath = join(homedir(), ".gbrain", "config.toml");
+  if (existsSync(configPath)) {
+    cachedConfig = loadTomlConfig(configPath);
+    return cachedConfig;
+  }
+
+  cachedConfig = DEFAULT_CONFIG;
+  return cachedConfig;
 }
 
 export function getConfig(): Config {
