@@ -152,16 +152,24 @@ gbrain import ./notes/
 
 | Command | Description |
 |---------|-------------|
+| `gbrain init <path>` | Initialize a new brain.db |
 | `gbrain get <slug>` | Get a page by slug |
-| `gbrain put <slug> < file.md` | Create/update a page (auto-embeds) |
+| `gbrain put <slug> [file.md]` | Create/update a page (auto-embeds) |
 | `gbrain note "<content>"` | Quick capture with LLM-inferred metadata |
-| `gbrain ingest <file1.md> [file2.md] ...` | Ingest one or more markdown files (with chunk metadata) |
-| `gbrain search "<query>"` | Full-text search (FTS5) |
-| `gbrain query "<question>"` | Semantic search (vector) |
 | `gbrain list [--type <type>]` | List pages with optional filter |
-| `gbrain stats` | Get brain statistics |
+| `gbrain search <query>` | Full-text search (FTS5) |
+| `gbrain query <question>` | Semantic search (vector) |
+| `gbrain embed [slug\|--all]` | Regenerate embeddings |
 | `gbrain tags <slug>` | Get tags for a page |
 | `gbrain backlinks <slug>` | Get pages linking to a page |
+| `gbrain delete [-y\|--yes] <slug> [...]` | Delete pages (auto-backup first) |
+| `gbrain stats` | Show brain statistics |
+| `gbrain import <dir>` | Import markdown files (bulk) |
+| `gbrain ingest <file.md> [...]` | Ingest one or more markdown files (with chunk metadata) |
+| `gbrain backup` | Create a timestamped backup |
+| `gbrain backups` | List all available backups |
+| `gbrain restore [file]` | Restore from a backup |
+| `gbrain --tools-json` | Show Claude Code tools |
 
 ## Claude Code Memory Integration
 
