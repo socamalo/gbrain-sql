@@ -38,8 +38,5 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 *.db-shm
 *.db-wal
 
-# config (local, never commit)
-config.toml
-
 # docs (generated)
 docs/
