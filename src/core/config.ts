@@ -111,8 +111,8 @@ export function loadConfig(): Config {
     }
   }
 
-  // Fallback to ~/.gbrain/config.toml
-  const configPath = join(homedir(), ".gbrain", "config.toml");
+  // Fallback to ~/gbrain-data/config.toml
+  const configPath = join(homedir(), "gbrain-data", "config.toml");
   if (existsSync(configPath)) {
     cachedConfig = loadTomlConfig(configPath);
     return cachedConfig;

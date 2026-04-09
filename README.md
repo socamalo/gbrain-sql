@@ -305,7 +305,7 @@ model = "MiniMax-M2.7"
 | `embedding_dimensions` | `4096` | Embedding vector dimensions |
 | `chunk_strategy` | `section` | How content is split for embedding |
 
-Config is looked up via `argv[1]` (the CLI script path) — walk up from script dir to find project root with `config.toml`. Falls back to `~/.gbrain/config.toml`.
+Config is looked up via `argv[1]` (the CLI script path) — walk up from script dir to find project root with `config.toml`. Falls back to `~/gbrain-data/config.toml`.
 
 ## Environment Variables
 

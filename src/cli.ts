@@ -8,7 +8,7 @@ import path from "path";
 import { existsSync, mkdirSync } from "fs";
 import { getConfig } from "./core/config";
 
-const DEFAULT_DB = path.join(os.homedir(), "gbrain", "brain.db");
+const DEFAULT_DB = path.join(os.homedir(), "gbrain-data", "brain.db");
 const DB_PATH = process.env.GBRAIN_DB || DEFAULT_DB;
 
 function getDb(): BrainDB {

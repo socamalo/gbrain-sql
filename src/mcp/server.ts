@@ -14,7 +14,7 @@ import os from "os";
 import path from "path";
 import { existsSync, mkdirSync } from "fs";
 
-const DEFAULT_DB = path.join(os.homedir(), "gbrain", "brain.db");
+const DEFAULT_DB = path.join(os.homedir(), "gbrain-data", "brain.db");
 const DB_PATH = process.env.GBRAIN_DB || DEFAULT_DB;
 
 const server = new Server(
