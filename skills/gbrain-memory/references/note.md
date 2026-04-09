@@ -53,14 +53,16 @@ The LLM returns this structure:
 
 ## When to Use
 
-- Quick capture of facts, ideas, observations
-- Don't bother with frontmatter or structure
+- Quick hands-free capture when speed is not critical
 - Best for: meeting notes, entity snapshots, quick thoughts
 
-## vs `gbrain put`
+## vs `gbrain put` (Preferred)
 
 | | `gbrain note` | `gbrain put` |
 |---|---|---|
+| Speed | Slower (LLM inference) | Fast |
 | Input | Natural language | Pre-written markdown |
-| Metadata | LLM-inferred | Frontmatter or defaults |
-| Use case | Quick capture | Structured authoring |
+| Metadata | LLM-inferred | Agent controls explicitly |
+| Use case | Rapid capture | Structured authoring |
+
+**Agent recommendation:** Prefer `gbrain put <slug>` — agent generates slug, writes frontmatter, controls metadata. Only use `gbrain note` when you need rapid hands-free capture and can tolerate LLM inference overhead.

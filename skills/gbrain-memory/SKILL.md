@@ -24,8 +24,11 @@ User input → Skill invoked → gbrain CLI → brain.db (permanent)
 ## Quick Commands
 
 ```bash
-# Store a fact
+# Store a fact (preferred - fast, agent controls slug)
 gbrain put <slug> < content.md
+
+# Quick note (LLM infers metadata - slower, use only for rapid capture)
+gbrain note "<content>"
 
 # Ingest markdown file(s) — each ## section becomes a chunk with metadata
 gbrain ingest <file1.md> [file2.md] ...
@@ -121,6 +124,10 @@ Reverse-chronological evidence. Never modified, only appended.
 > Note: User info may also be stored under personal name slugs. Always use flexible query strategies below to find user data.
 
 ## When to Write
+
+**Use `gbrain put <slug>` (preferred)** — agent generates slug, controls metadata, fast.
+
+**Use `gbrain note`** only for rapid hands-free capture when speed matters less.
 
 1. User introduces themselves or shares a fact
 2. User expresses a preference or requirement
