@@ -109,14 +109,16 @@ Reverse-chronological evidence. Never modified, only appended.
 - Detail
 ```
 
-## Key Memory Slugs
+## Key Memory Slugs (Canonical)
 
 | Slug | Content |
 |------|---------|
-| `user/me` | Facts about the user |
+| `user/me` | Facts about the user (primary, preferred) |
 | `user/projects` | Active projects |
 | `user/context` | Current session context |
 | `user/preferences` | How user likes to work |
+
+> Note: User info may also be stored under personal name slugs. Always use flexible query strategies below to find user data.
 
 ## When to Write
 
@@ -128,7 +130,22 @@ Reverse-chronological evidence. Never modified, only appended.
 
 ## When to Read
 
-1. Start of conversation: `gbrain get user/me`
-2. When user asks about their projects
-3. When making suggestions that should account for user preferences
-4. **When you don't know something: search memory first, then external search** — use the shortest core keywords (add more only if nothing is found)
+1. **Start of conversation**: First try `gbrain get user/me` (if exists). If not found, search for type=person pages or use `gbrain query "who is the user"`.
+2. When user asks about themselves (e.g., "what's my name", "who am I"): use `gbrain query "<question>"` + `gbrain search "name"`.
+3. When user asks about their projects
+4. When making suggestions that should account for user preferences
+5. **When you don't know something: search memory first, then external search** — use the shortest core keywords (add more only if nothing is found)
+
+### Finding User Info (Flexible Query)
+
+User info may be stored under various slugs. Query strategies:
+
+```bash
+# Try these in order:
+gbrain get user/me                    # canonical slug
+gbrain list --type person             # list all person pages
+gbrain query "who is the user"        # semantic search
+gbrain search "name"                   # FTS5 search
+```
+
+Synthesize from results: prefer type=person pages, use the most recent one if multiple exist.
