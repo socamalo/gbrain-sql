@@ -8,10 +8,12 @@ import { resolve, relative, sep } from 'path';
 import type { BrainEngine } from './engine.ts';
 import { clampSearchLimit } from './engine.ts';
 import type { GBrainConfig } from './config.ts';
+import type { PageType } from './types.ts';
 import { importFromContent } from './import-file.ts';
 import { hybridSearch } from './search/hybrid.ts';
 import { expandQuery } from './search/expansion.ts';
 import { dedupResults } from './search/dedup.ts';
+import { extractPageLinks, isAutoLinkEnabled } from './link-extraction.ts';
 import * as db from './db.ts';
 
 // --- Types ---
@@ -219,7 +221,7 @@ const get_page: Operation = {
 
 const put_page: Operation = {
   name: 'put_page',
-  description: 'Write/update a page (markdown with frontmatter). Chunks, embeds, and reconciles tags.',
+  description: 'Write/update a page (markdown with frontmatter). Chunks, embeds, reconciles tags, and (when auto_link is enabled) extracts + reconciles graph links.',
   params: {
     slug: { type: 'string', required: true, description: 'Page slug' },
     content: { type: 'string', required: true, description: 'Full markdown content with YAML frontmatter' },
@@ -227,11 +229,110 @@ const put_page: Operation = {
   mutating: true,
   handler: async (ctx, p) => {
     if (ctx.dryRun) return { dry_run: true, action: 'put_page', slug: p.slug };
-    const result = await importFromContent(ctx.engine, p.slug as string, p.content as string);
-    return { slug: result.slug, status: result.status === 'imported' ? 'created_or_updated' : result.status, chunks: result.chunks };
+    const slug = p.slug as string;
+    // Skip embedding when no OpenAI key is configured. importFromContent's existing
+    // try/catch around embed only catches; without a key the OpenAI client would
+    // attempt 5 retries with exponential backoff (up to ~2 minutes total) before
+    // giving up. Detect early.
+    const noEmbed = !process.env.OPENAI_API_KEY;
+    const result = await importFromContent(ctx.engine, slug, p.content as string, { noEmbed });
+
+    // Auto-link post-hook: runs AFTER importFromContent (which is its own
+    // transaction). Runs even on status='skipped' so reconciliation catches drift
+    // between the page text and the links table. Failures are non-blocking.
+    //
+    // SECURITY: skipped for remote (MCP) callers. Auto-link's bare-slug regex
+    // matches `people/X` etc. anywhere in page text, including code fences,
+    // quoted strings, and prompt-injected content. An untrusted page can plant
+    // arbitrary outbound links by including `see meetings/board-q1` in its body.
+    // Combined with the backlink boost in hybridSearch, attacker-placed targets
+    // would surface higher in search. Local CLI users (ctx.remote=false) opt
+    // into this behavior; MCP/remote writes do not.
+    let autoLinks: { created: number; removed: number; errors: number } | { error: string } | { skipped: 'remote' } | undefined;
+    if (ctx.remote === true) {
+      autoLinks = { skipped: 'remote' };
+    } else if (result.parsedPage) {
+      try {
+        const enabled = await isAutoLinkEnabled(ctx.engine);
+        if (enabled) {
+          autoLinks = await runAutoLink(ctx.engine, slug, result.parsedPage);
+        }
+      } catch (e) {
+        autoLinks = { error: e instanceof Error ? e.message : String(e) };
+      }
+    }
+
+    return {
+      slug: result.slug,
+      status: result.status === 'imported' ? 'created_or_updated' : result.status,
+      chunks: result.chunks,
+      ...(autoLinks ? { auto_links: autoLinks } : {}),
+    };
   },
   cliHints: { name: 'put', positional: ['slug'], stdin: 'content' },
 };
+
+/**
+ * Extract entity refs from a freshly-written page, sync the links table to match.
+ * Creates new links via addLink, removes stale ones (links present in DB but no
+ * longer referenced in content) via removeLink. Returns counts.
+ *
+ * Runs OUTSIDE importFromContent's transaction so it doesn't block the page write
+ * or get rolled back if a single link operation fails. Per-link failures are
+ * counted; the overall function never throws (catch in put_page handler covers
+ * extraction errors).
+ */
+async function runAutoLink(
+  engine: BrainEngine,
+  slug: string,
+  parsed: { type: PageType; compiled_truth: string; timeline: string; frontmatter: Record<string, unknown> },
+): Promise<{ created: number; removed: number; errors: number }> {
+  const fullContent = parsed.compiled_truth + '\n' + parsed.timeline;
+  const candidates = extractPageLinks(fullContent, parsed.frontmatter, parsed.type);
+
+  // Resolve which targets exist (skip refs to non-existent pages to avoid FK
+  // violation churn in addLink). One getAllSlugs call upfront, O(1) lookup.
+  const allSlugs = await engine.getAllSlugs();
+  const valid = candidates.filter(c => allSlugs.has(c.targetSlug));
+
+  // Run getLinks + addLink/removeLink loops inside a single transaction so that
+  // concurrent put_page calls on the same slug can't race the reconciliation:
+  // without this, two simultaneous writes both read stale `existingKeys` and
+  // re-create links the other side just removed (lost-update). The transaction
+  // serializes via row-level locks on `links` rows touched by addLink/removeLink.
+  return await engine.transaction(async (tx) => {
+    const existing = await tx.getLinks(slug);
+    const desiredKeys = new Set(valid.map(c => `${c.targetSlug}\u0000${c.linkType}`));
+    const existingKeys = new Set(existing.map(l => `${l.to_slug}\u0000${l.link_type}`));
+
+    let created = 0, removed = 0, errors = 0;
+
+    // Add new + update existing.
+    for (const c of valid) {
+      try {
+        await tx.addLink(slug, c.targetSlug, c.context, c.linkType);
+        if (!existingKeys.has(`${c.targetSlug}\u0000${c.linkType}`)) created++;
+      } catch {
+        errors++;
+      }
+    }
+
+    // Remove stale (in DB but not in desired set).
+    for (const l of existing) {
+      const key = `${l.to_slug}\u0000${l.link_type}`;
+      if (!desiredKeys.has(key)) {
+        try {
+          await tx.removeLink(slug, l.to_slug, l.link_type);
+          removed++;
+        } catch {
+          errors++;
+        }
+      }
+    }
+
+    return { created, removed, errors };
+  });
+}
 
 const delete_page: Operation = {
   name: 'delete_page',
@@ -424,15 +525,40 @@ const get_backlinks: Operation = {
   cliHints: { name: 'backlinks', positional: ['slug'] },
 };
 
+/**
+ * Hard cap on traverse_graph depth from MCP callers. Each recursive CTE iteration
+ * grows a `visited` array per path; in `direction=both` the join is `OR`-based and
+ * fans out exponentially. Without a cap, a remote MCP caller can pass depth=1e6
+ * and burn memory/CPU on the database. 10 hops is well beyond any realistic
+ * relationship query (Wintermute's "people who attended meetings with Alice"
+ * is 2 hops; the deepest meaningful chain in our test data is 4).
+ */
+const TRAVERSE_DEPTH_CAP = 10;
+
 const traverse_graph: Operation = {
   name: 'traverse_graph',
-  description: 'Traverse link graph from a page',
+  description: 'Traverse link graph from a page. With link_type/direction, returns edges (GraphPath[]) instead of nodes.',
   params: {
     slug: { type: 'string', required: true },
-    depth: { type: 'number', description: 'Max traversal depth (default 5)' },
+    depth: { type: 'number', description: `Max traversal depth (default 5, capped at ${TRAVERSE_DEPTH_CAP})` },
+    link_type: { type: 'string', description: 'Filter to one link type (per-edge filter, traversal only follows matching edges)' },
+    direction: { type: 'string', enum: ['in', 'out', 'both'], description: 'Traversal direction (default out)' },
   },
   handler: async (ctx, p) => {
-    return ctx.engine.traverseGraph(p.slug as string, (p.depth as number) || 5);
+    const slug = p.slug as string;
+    const requestedDepth = (p.depth as number) || 5;
+    if (requestedDepth > TRAVERSE_DEPTH_CAP) {
+      ctx.logger.warn(`[gbrain] traverse_graph depth clamped from ${requestedDepth} to ${TRAVERSE_DEPTH_CAP}`);
+    }
+    const depth = Math.max(1, Math.min(requestedDepth, TRAVERSE_DEPTH_CAP));
+    const linkType = p.link_type as string | undefined;
+    const direction = p.direction as 'in' | 'out' | 'both' | undefined;
+    // Backward compat: when neither link_type nor direction is provided, return
+    // the legacy GraphNode[] shape. Once either is set, switch to GraphPath[].
+    if (linkType === undefined && direction === undefined) {
+      return ctx.engine.traverseGraph(slug, depth);
+    }
+    return ctx.engine.traversePaths(slug, { depth, linkType, direction });
   },
   cliHints: { name: 'graph', positional: ['slug'] },
 };
@@ -452,8 +578,24 @@ const add_timeline_entry: Operation = {
   mutating: true,
   handler: async (ctx, p) => {
     if (ctx.dryRun) return { dry_run: true, action: 'add_timeline_entry', slug: p.slug };
+    const date = p.date as string;
+    // Reject anything that isn't a strict YYYY-MM-DD with year 1900-2199 and
+    // a real calendar day. PG DATE accepts year 5874897 silently — that's a
+    // semantic bug nobody actually wants.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new Error(`Invalid date format "${date}" (expected YYYY-MM-DD)`);
+    }
+    const [y, m, d] = date.split('-').map(Number);
+    if (y < 1900 || y > 2199 || m < 1 || m > 12 || d < 1 || d > 31) {
+      throw new Error(`Invalid date "${date}" (year 1900-2199, month 1-12, day 1-31)`);
+    }
+    // Round-trip through Date to catch e.g. Feb 30.
+    const parsed = new Date(date);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+      throw new Error(`Invalid calendar date "${date}"`);
+    }
     await ctx.engine.addTimelineEntry(p.slug as string, {
-      date: p.date as string,
+      date,
       source: (p.source as string) || '',
       summary: p.summary as string,
       detail: (p.detail as string) || '',

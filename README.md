@@ -4,6 +4,8 @@ Your AI agent is smart but forgetful. GBrain gives it a brain.
 
 Built by the President and CEO of Y Combinator to run his actual AI agents. The production brain powering his OpenClaw and Hermes deployments: **17,888 pages, 4,383 people, 723 companies**, 21 cron jobs running autonomously, built in 12 days. The agent ingests meetings, emails, tweets, voice calls, and original ideas while you sleep. It enriches every person and company it encounters. It fixes its own citations and consolidates memory overnight. You wake up and the brain is smarter than when you went to bed.
 
+The brain wires itself. Every page write extracts entity references and creates typed links (`attended`, `works_at`, `invested_in`, `founded`, `advises`) with zero LLM calls. Hybrid search. Self-wiring knowledge graph. Structured timeline. Backlink-boosted ranking. Ask "who works at Acme AI?" or "what did Bob invest in this quarter?" and get answers vector search alone can't reach. Benchmarked end-to-end: **Recall@5 jumps from 83% to 95%, Precision@5 from 39% to 45%, +30 more correct answers in the agent's top-5 reads** on a 240-page Opus-generated rich-prose corpus. Graph-only F1: **86.6% vs grep's 57.8%** (+28.8 pts). [Full report](docs/benchmarks/2026-04-18-brainbench-v1.md).
+
 GBrain is those patterns, generalized. 26 skills. Install in 30 minutes. Your agent does the work. As Garry's personal agent gets smarter, so does yours.
 
 > **~30 minutes to a fully working brain.** Database ready in 2 seconds (PGLite, no server). You just answer questions about API keys.
@@ -147,6 +149,7 @@ Signal arrives (meeting, email, tweet, link)
   -> Brain-ops: check the brain first (gbrain search, gbrain get)
   -> Respond with full context
   -> Write: update brain pages with new information + citations
+  -> Auto-link: typed relationships extracted on every write (zero LLM calls)
   -> Sync: gbrain indexes changes for next query
 ```
 
@@ -317,6 +320,36 @@ want, which you can't learn any other way.
 
 Above the `---`: **compiled truth**. Your current best understanding. Gets rewritten when new evidence changes the picture. Below: **timeline**. Append-only evidence trail. Never edited, only added to.
 
+## Knowledge Graph
+
+Pages aren't just text. Every mention of a person, company, or concept becomes a typed link in a structured graph. The brain wires itself.
+
+```
+Write a meeting page mentioning Alice and Acme AI
+  -> Auto-link extracts entity refs from content (zero LLM calls)
+  -> Infers types: meeting page + person ref => `attended`
+                   "CEO of X" pattern        => `works_at`
+                   "invested in"             => `invested_in`
+                   "advises", "advisor"      => `advises`
+                   "founded", "co-founded"   => `founded`
+  -> Reconciles stale links: edits remove links no longer in content
+  -> Backlinks rank well-connected entities higher in search
+```
+
+```bash
+gbrain graph-query people/alice --type attended --depth 2
+# returns who Alice met with, transitively
+```
+
+The graph powers questions vector search can't: "who works at Acme AI?", "what has Bob invested in?", "find the connection between Alice and Carol". Backfill an existing brain in one command:
+
+```bash
+gbrain extract links --source db        # wire up the existing 29K pages
+gbrain extract timeline --source db     # extract dated events from markdown timelines
+```
+
+Then ask graph questions or watch the search ranking improve. Benchmarked: **Recall@5 jumps from 83% to 95%, Precision@5 from 39% to 45%, +30 more correct answers in the agent's top-5 reads** on a 240-page Opus-generated rich-prose corpus. Graph-only F1 hits 86.6% vs grep's 57.8% (+28.8 pts). See [docs/benchmarks/2026-04-18-brainbench-v1.md](docs/benchmarks/2026-04-18-brainbench-v1.md).
+
 ## Search
 
 Hybrid search: vector + keyword + RRF fusion + multi-query expansion + 4-layer dedup.
@@ -333,6 +366,74 @@ Query
 ```
 
 Keyword alone misses conceptual matches. Vector alone misses exact phrases. RRF gets both. Search quality is benchmarked and reproducible: `gbrain eval --qrels queries.json` measures P@k, Recall@k, MRR, and nDCG@k. A/B test config changes before deploying them.
+
+## Why it works: many strategies in concert
+
+The brain isn't one trick. Every retrieval question goes through ~20 deterministic
+techniques layered together. No single one is magic; the win comes from stacking
+them so each layer covers what the others miss.
+
+```
+Question
+  │
+  ├─ INGESTION (every put_page)
+  │    ├─ Recursive markdown chunking (or semantic / LLM-guided)
+  │    ├─ Embedding cache invalidation on edit
+  │    └─ Idempotent imports (content-hash dedup)
+  │
+  ├─ GRAPH EXTRACTION (auto-link post-hook, zero LLM)
+  │    ├─ Entity-ref regex (markdown links + bare slugs)
+  │    ├─ Code-fence stripping (no false-positive slugs in code blocks)
+  │    ├─ Typed inference cascade (FOUNDED → INVESTED → ADVISES → WORKS_AT)
+  │    ├─ Page-role priors (partner-bio language → invested_in)
+  │    ├─ Within-page dedup (same target collapses to one link)
+  │    ├─ Stale-link reconciliation (edits remove dropped refs)
+  │    └─ Multi-type link constraint (same person can works_at AND advises)
+  │
+  ├─ SEARCH PIPELINE (every query)
+  │    ├─ Intent classifier (entity / temporal / event / general — auto-routes)
+  │    ├─ Multi-query expansion (Haiku rephrases the question 3 ways)
+  │    ├─ Vector search (HNSW cosine over OpenAI embeddings)
+  │    ├─ Keyword search (Postgres tsvector + websearch_to_tsquery)
+  │    ├─ Reciprocal Rank Fusion (score = sum 1/(60+rank) across both)
+  │    ├─ Cosine re-scoring (re-rank chunks against actual query embedding)
+  │    ├─ Compiled-truth boost (assessments outrank timeline noise)
+  │    ├─ Backlink boost (well-connected entities rank higher)
+  │    └─ Source-aware dedup (one CT chunk per page guaranteed)
+  │
+  ├─ GRAPH TRAVERSAL (relational queries)
+  │    ├─ Recursive CTE with cycle prevention (visited-array check)
+  │    ├─ Type-filtered edges (--type works_at, attended, etc.)
+  │    ├─ Direction control (in / out / both)
+  │    └─ Depth-capped (≤10 for remote MCP; DoS prevention)
+  │
+  └─ AGENT WORKFLOW (graph-confident hybrid)
+       ├─ Graph-query first (high-precision typed answers)
+       ├─ Grep fallback when graph returns nothing
+       └─ Graph hits ranked first in top-K (better P@K and R@K)
+```
+
+End-to-end on the BrainBench v1 corpus (240 rich-prose pages, before/after PR #188):
+
+| Metric                  | BEFORE PR #188 | AFTER PR #188 | Δ           |
+|-------------------------|----------------|---------------|-------------|
+| **Precision@5**         | 39.2%          | **44.7%**     | **+5.4 pts**|
+| **Recall@5**            | 83.1%          | **94.6%**     | **+11.5 pts**|
+| Correct in top-5        | 217            | 247           | **+30**     |
+| Graph-only F1 (ablation)| 57.8% (grep)   | **86.6%**     | **+28.8 pts**|
+
+Plus 5 orthogonal capability checks (identity resolution, temporal queries,
+performance at 10K-page scale, robustness to malformed input, MCP operation
+contract). All pass. [Full report.](docs/benchmarks/2026-04-18-brainbench-v1.md)
+
+The point: each technique handles a class of inputs the others miss. Vector
+search misses exact slug refs; keyword catches them. Keyword misses conceptual
+matches; vector catches them. RRF picks the best of both. Compiled-truth boost
+keeps assessments above timeline noise. Auto-link extraction wires the graph
+that lets backlink boost rank well-connected entities higher. Graph traversal
+answers questions search alone can't reach. The agent picks graph-first for
+precision and falls back to keyword for recall. **All deterministic, all in
+concert, all measured.**
 
 ## Voice
 
@@ -412,7 +513,11 @@ EMBEDDINGS
   gbrain embed [<slug>|--all|--stale]   Generate/refresh embeddings
 
 LINKS + GRAPH
-  gbrain link|unlink|backlinks|graph    Cross-reference management
+  gbrain link|unlink|backlinks          Cross-reference management
+  gbrain extract links|timeline|all     Batch backfill from existing pages
+                                        (--source db|fs, --type, --since, --dry-run)
+  gbrain graph-query <slug>             Typed traversal (--type T --depth N
+                                        --direction in|out|both)
 
 JOBS (Minions)
   gbrain jobs submit <name> [--params JSON] [--follow]  Submit a background job
@@ -463,6 +568,9 @@ The skills in this repo are those patterns, generalized. What took 11 days to bu
 **Reference:**
 - [GBRAIN_V0.md](docs/GBRAIN_V0.md) ... Full product spec
 - [CHANGELOG.md](CHANGELOG.md) ... Version history
+
+**Benchmarks:**
+- [BrainBench v1 (PR #188)](docs/benchmarks/2026-04-18-brainbench-v1.md) ... single comprehensive before/after report on a 240-page Opus-generated corpus. 7 categories: relational queries, identity resolution, temporal queries, performance, robustness, MCP contract.
 
 ## Contributing
 

@@ -136,6 +136,34 @@ Spot-check pages for missing `[Source: ...]` citations:
 Inconsistent tagging (e.g., "vc" vs "venture-capital", "ai" vs "artificial-intelligence").
 - Standardize to the most common variant using gbrain tag operations
 
+### Graph population (v0.10.3+)
+
+The `links` and `timeline_entries` tables are the structured graph layer.
+Populate them periodically or after major imports:
+
+- `gbrain extract links --source db` — backfill structured links by walking pages
+  from the engine. Reads `[Name](people/slug)` / `[Name](companies/slug)` references
+  and infers relationship types (`attended`, `works_at`, `invested_in`, `founded`,
+  `advises`, `mentions`, `source`). Idempotent. Use `--source fs --dir <brain>`
+  if you have a markdown checkout to walk instead.
+- `gbrain extract timeline --source db` — backfill structured timeline entries.
+  Parses `- **YYYY-MM-DD** | summary` lines from page content. Idempotent (DB
+  UNIQUE constraint).
+- `gbrain extract all --source db` — both in one run.
+- `gbrain graph-query <slug> --depth 2` — verify connectivity (use any well-known
+  entity slug as a probe).
+- `gbrain stats` — verify `link_count > 0` and `timeline_entry_count > 0` after extraction.
+- `gbrain health` — review `link_coverage` and `timeline_coverage` percentages
+  on entity pages (person/company). Below 50% means more extraction is needed.
+
+Available link types (use with `gbrain graph-query --type`):
+`attended`, `works_at`, `invested_in`, `founded`, `advises`, `mentions`, `source`.
+
+Going forward, every `gbrain put` call auto-creates and reconciles links via the
+auto-link post-hook (default on; disable: `gbrain config set auto_link false`).
+So link-extract is mostly a one-time backfill. timeline-extract should be re-run
+after bulk imports or content edits that add new dated entries.
+
 ### Embedding freshness
 Chunks without embeddings, or chunks embedded with an old model.
 - For large embedding refreshes (>1000 chunks), use nohup:

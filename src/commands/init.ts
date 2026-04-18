@@ -125,7 +125,15 @@ async function initPGLite(opts: { jsonOutput: boolean; apiKey: string | null; cu
   } else {
     console.log(`\nBrain ready at ${dbPath}`);
     console.log(`${stats.page_count} pages. Engine: PGLite (local Postgres).`);
-    console.log('Next: gbrain import <dir>');
+    if (stats.page_count > 0) {
+      console.log('');
+      console.log('Existing brain detected. To wire up the v0.10.3 knowledge graph:');
+      console.log('  gbrain extract links --source db        (typed link backfill)');
+      console.log('  gbrain extract timeline --source db     (structured timeline backfill)');
+      console.log('  gbrain stats                            (verify links > 0)');
+    } else {
+      console.log('Next: gbrain import <dir>');
+    }
     console.log('');
     console.log('When you outgrow local: gbrain migrate --to supabase');
     reportModStatus();
@@ -197,7 +205,15 @@ async function initPostgres(opts: { databaseUrl: string; jsonOutput: boolean; ap
     console.log(JSON.stringify({ status: 'success', engine: 'postgres', pages: stats.page_count }));
   } else {
     console.log(`\nBrain ready. ${stats.page_count} pages. Engine: Postgres (Supabase).`);
-    console.log('Next: gbrain import <dir>');
+    if (stats.page_count > 0) {
+      console.log('');
+      console.log('Existing brain detected. To wire up the v0.10.3 knowledge graph:');
+      console.log('  gbrain extract links --source db        (typed link backfill)');
+      console.log('  gbrain extract timeline --source db     (structured timeline backfill)');
+      console.log('  gbrain stats                            (verify links > 0)');
+    } else {
+      console.log('Next: gbrain import <dir>');
+    }
     reportModStatus();
   }
 }

@@ -48,17 +48,21 @@ strict behavior when unset.
 - `src/core/transcription.ts` — Audio transcription: Groq Whisper (default), OpenAI fallback, ffmpeg segmentation for >25MB
 - `src/core/enrichment-service.ts` — Global enrichment service: entity slug generation, tier auto-escalation, batch throttling
 - `src/core/data-research.ts` — Recipe validation, field extraction (MRR/ARR regex), dedup, tracker parsing, HTML stripping
+- `src/commands/extract.ts` — `gbrain extract links|timeline|all [--source fs|db]`: batch link/timeline extraction. fs walks markdown files, db walks pages from the engine (mutation-immune snapshot iteration; use this for live brains with no local checkout)
+- `src/commands/graph-query.ts` — `gbrain graph-query <slug> [--type T] [--depth N] [--direction in|out|both]`: typed-edge relationship traversal (renders indented tree)
+- `src/core/link-extraction.ts` — shared library for the v0.12.0 graph layer. extractEntityRefs (canonical, replaces backlinks.ts duplicate), extractPageLinks, inferLinkType heuristics (attended/works_at/invested_in/founded/advises/source/mentions), parseTimelineEntries, isAutoLinkEnabled config helper. Used by extract.ts, operations.ts auto-link post-hook, and backlinks.ts.
 - `src/core/minions/` — Minions job queue: BullMQ-inspired, Postgres-native (queue, worker, backoff, types)
 - `src/core/minions/queue.ts` — MinionQueue class (submit, claim, complete, fail, stall detection, parent-child, depth/child-cap, per-job timeouts, cascade-kill, attachments, idempotency keys, child_done inbox, removeOnComplete/Fail)
 - `src/core/minions/worker.ts` — MinionWorker class (handler registry, lock renewal, graceful shutdown, timeout safety net)
 - `src/core/minions/attachments.ts` — Attachment validation (path traversal, null byte, oversize, base64, duplicate detection)
 - `src/commands/jobs.ts` — `gbrain jobs` CLI subcommands + `gbrain jobs work` daemon
-- `src/commands/extract.ts` — `gbrain extract links|timeline|all`: batch link/timeline extraction from markdown
 - `src/commands/features.ts` — `gbrain features --json --auto-fix`: usage scan + feature adoption salesman
 - `src/commands/autopilot.ts` — `gbrain autopilot --install`: self-maintaining brain daemon (sync+extract+embed)
 - `src/mcp/server.ts` — MCP stdio server (generated from operations)
 - `src/commands/auth.ts` — Standalone token management (create/list/revoke/test)
-- `src/commands/upgrade.ts` — Self-update CLI with post-upgrade feature discovery + features hook
+- `src/commands/upgrade.ts` — Self-update CLI. `runPostUpgrade()` enumerates migrations from the TS registry (src/commands/migrations/index.ts) and tail-calls `runApplyMigrations(['--yes', '--non-interactive'])` so the mechanical side of every outstanding migration runs unconditionally.
+- `src/commands/migrations/` — TS migration registry (compiled into the binary; no filesystem walk of `skills/migrations/*.md` needed at runtime). `index.ts` lists migrations in semver order. `v0_11_0.ts` = Minions adoption orchestrator (8 phases). `v0_12_0.ts` = Knowledge Graph auto-wire orchestrator (5 phases: schema → config check → backfill links → backfill timeline → verify). All orchestrators are idempotent and resumable from `partial` status.
+- `docs/UPGRADING_DOWNSTREAM_AGENTS.md` — Patches for downstream agent skill forks (Wintermute etc.) to apply when upgrading. Each release appends a new section. v0.10.3 includes diffs for brain-ops, meeting-ingestion, signal-detector, enrich.
 - `src/core/schema-embedded.ts` — AUTO-GENERATED from schema.sql (run `bun run build:schema`)
 - `src/schema.sql` — Full Postgres + pgvector DDL (source of truth, generates schema-embedded.ts)
 - `src/commands/integrations.ts` — Standalone integration recipe management (no DB needed). Exports `getRecipeDirs()` (trust-tagged recipe sources), SSRF helpers (`isInternalUrl`, `parseOctet`, `hostnameToOctets`, `isPrivateIpv4`). Only package-bundled recipes are `embedded=true`; `$GBRAIN_RECIPES_DIR` and cwd `./recipes/` are untrusted and cannot run `command`/`http`/string health checks.
@@ -127,7 +131,7 @@ Key commands added for Minions (job queue):
 
 ## Testing
 
-`bun test` runs all tests (49 unit test files + 8 E2E test files). Unit tests run
+`bun test` runs all tests. After the v0.12.0 release: ~74 unit test files + 8 E2E test files (1297 unit pass, 38 expected E2E skips when DATABASE_URL is unset). Unit tests run
 without a database. E2E tests skip gracefully when `DATABASE_URL` is not set.
 
 Unit tests: `test/markdown.test.ts` (frontmatter parsing), `test/chunkers/recursive.test.ts`
@@ -161,6 +165,9 @@ parity), `test/cli.test.ts` (CLI structure), `test/config.test.ts` (config redac
 `test/data-research.test.ts` (recipe validation, MRR/ARR extraction, dedup, tracker parsing, HTML stripping),
 `test/minions.test.ts` (Minions job queue v7: CRUD, state machine, backoff, stall detection, dependencies, worker lifecycle, lock management, claim mechanics, depth/child-cap, timeouts, cascade kill, idempotency, child_done inbox, attachments, removeOnComplete/Fail),
 `test/extract.test.ts` (link extraction, timeline extraction, frontmatter parsing, directory type inference),
+`test/extract-db.test.ts` (gbrain extract --source db: typed link inference, idempotency, --type filter, --dry-run JSON output),
+`test/link-extraction.test.ts` (canonical extractEntityRefs both formats, extractPageLinks dedup, inferLinkType heuristics, parseTimelineEntries date variants, isAutoLinkEnabled config),
+`test/graph-query.test.ts` (direction in/out/both, type filter, indented tree output),
 `test/features.test.ts` (feature scanning, brain_score calculation, CLI routing, persistence),
 `test/file-upload-security.test.ts` (symlink traversal, cwd confinement, slug + filename allowlists, remote vs local trust),
 `test/query-sanitization.test.ts` (prompt-injection stripping, output sanitization, structural boundary),
@@ -169,6 +176,7 @@ parity), `test/cli.test.ts` (CLI structure), `test/config.test.ts` (config redac
 E2E tests (`test/e2e/`): Run against real Postgres+pgvector. Require `DATABASE_URL`.
 - `bun run test:e2e` runs Tier 1 (mechanical, all operations, no API keys)
 - `test/e2e/search-quality.test.ts` runs search quality E2E against PGLite (no API keys, in-memory)
+- `test/e2e/graph-quality.test.ts` runs the v0.10.3 knowledge graph pipeline (auto-link via put_page, reconciliation, traversePaths) against PGLite in-memory
 - `test/e2e/upgrade.test.ts` runs check-update E2E against real GitHub API (network required)
 - Tier 2 (`skills.test.ts`) requires OpenClaw + API keys, runs nightly in CI
 - If `.env.testing` doesn't exist in this directory, check sibling worktrees for one:
@@ -269,11 +277,58 @@ Files that MUST be checked on every ship:
 
 A ship without updated docs is an incomplete ship. Period.
 
-## CHANGELOG voice
+## CHANGELOG voice + release-summary format
 
-CHANGELOG.md is read by agents during auto-update (Section 17). The agent summarizes
-the changelog to convince the user to upgrade. Write changelog entries that sell the
-upgrade, not document the implementation.
+Every version entry in `CHANGELOG.md` MUST start with a release-summary section in
+the GStack/Garry voice — one viewport's worth of prose + tables that lands like a
+verdict, not marketing. The itemized changelog (subsections, bullets, files) goes
+BELOW that summary, separated by a `### Itemized changes` header.
+
+The release-summary section gets read by humans, by the auto-update agent, and by
+anyone deciding whether to upgrade. The itemized list is for agents that need to
+know exactly what changed.
+
+### Release-summary template
+
+Use this structure for the top of every `## [X.Y.Z]` entry:
+
+1. **Two-line bold headline** (10-14 words total) ... should land like a verdict, not
+   marketing. Sound like someone who shipped today and cares whether it works.
+2. **Lead paragraph** (3-5 sentences) ... what shipped, what changed for the user.
+   Specific, concrete, no AI vocabulary, no em dashes, no hype.
+3. **A "The X numbers that matter" section** with:
+   - One short setup paragraph naming the source of the numbers (real production
+     deployment OR a reproducible benchmark ... name the file/command to run).
+   - A table of 3-6 key metrics with BEFORE / AFTER / Δ columns.
+   - A second optional table for per-category breakdown if relevant.
+   - 1-2 sentences interpreting the most striking number in concrete user terms.
+4. **A "What this means for [audience]" closing paragraph** (2-4 sentences) tying
+   the metrics to a real workflow shift. End with what to do.
+
+Voice rules:
+- No em dashes (use commas, periods, "...").
+- No AI vocabulary (delve, robust, comprehensive, nuanced, fundamental, etc.) or
+  banned phrases ("here's the kicker", "the bottom line", etc.).
+- Real numbers, real file names, real commands. Not "fast" but "~30s on 30K pages."
+- Short paragraphs, mix one-sentence punches with 2-3 sentence runs.
+- Connect to user outcomes: "the agent does ~3x less reading" beats "improved
+  precision."
+- Be direct about quality. "Well-designed" or "this is a mess." No dancing.
+
+Source material to pull from:
+- CHANGELOG.md previous entry for prior context
+- `docs/benchmarks/[latest].md` for the headline numbers
+- Recent commits (`git log <prev-version>..HEAD --oneline`) for what shipped
+- Don't make up numbers. If a metric isn't in a benchmark or production data, don't
+  include it. Say "no measurement yet" if asked.
+
+Target length: ~250-350 words for the summary. Should render as one viewport.
+
+### Itemized changes (the existing rules)
+
+Below the release summary, write `### Itemized changes` and continue with the
+detailed subsections (Knowledge Graph Layer, Schema migrations, Security hardening,
+Tests, etc.). Same rules as before:
 
 - Lead with what the user can now DO that they couldn't before
 - Frame as benefits and capabilities, not files changed or code written
@@ -286,6 +341,13 @@ upgrade, not document the implementation.
 - **Always credit community contributions.** When a CHANGELOG entry includes work from
   a community PR, name the contributor with `Contributed by @username`. Contributors
   did real work. Thank them publicly every time, no exceptions.
+
+### Reference: v0.12.0 entry as canonical example
+
+The v0.12.0 entry in CHANGELOG.md is the canonical example of the format. Match its
+structure for every future version: bold headline, lead paragraph, "numbers that
+matter" with BrainBench-style before/after table, "what this means" closer, then
+`### Itemized changes` with the detailed sections below.
 
 ## Version migrations
 
@@ -361,6 +423,22 @@ done
 ```
 
 If any SHA differs from what's in the workflow files, update the pin and version comment.
+
+## PR descriptions cover the whole branch
+
+Pull request titles and bodies must describe **everything in the PR diff against the
+base branch**, not just the most recent commit you made. When you open or update a
+PR, walk the full commit range with `git log --oneline <base>..<head>` and write the
+body to cover all of it. Group by feature area (schema, code, tests, docs) — not
+chronologically by commit.
+
+This matters because reviewers read the PR body to understand what's shipping. If
+the body only covers your last commit, they miss everything else and can't review
+properly. A 7-commit PR with a body that describes commit 7 is worse than no body
+at all — it actively misleads.
+
+When in doubt, run `gh pr view <N> --json commits --jq '[.commits[].messageHeadline]'`
+to see what's actually in the PR before writing the body.
 
 ## Community PR wave process
 

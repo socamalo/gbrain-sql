@@ -219,6 +219,57 @@ const MIGRATIONS: Migration[] = [
       END $$;
     `,
   },
+  // ── Knowledge graph layer (PR #188, originally proposed as v5/v6/v7 but
+  //    renumbered to v8/v9/v10 to land after the master Minions migrations).
+  //    Existing brains migrated against the original v5/v6/v7 names (in
+  //    branches that pre-dated the merge) get a no-op pass here because
+  //    every statement is idempotent.
+  {
+    version: 8,
+    name: 'multi_type_links_constraint',
+    // Idempotent for both upgrade and fresh-install paths.
+    // Fresh installs already have links_from_to_type_unique from schema.sql; we drop it
+    // (along with the legacy from-to-only constraint) before re-adding it cleanly.
+    sql: `
+      ALTER TABLE links DROP CONSTRAINT IF EXISTS links_from_page_id_to_page_id_key;
+      ALTER TABLE links DROP CONSTRAINT IF EXISTS links_from_to_type_unique;
+      DELETE FROM links a USING links b
+        WHERE a.from_page_id = b.from_page_id
+          AND a.to_page_id = b.to_page_id
+          AND a.link_type = b.link_type
+          AND a.id > b.id;
+      ALTER TABLE links ADD CONSTRAINT links_from_to_type_unique
+        UNIQUE(from_page_id, to_page_id, link_type);
+    `,
+  },
+  {
+    version: 9,
+    name: 'timeline_dedup_index',
+    // Idempotent: CREATE UNIQUE INDEX IF NOT EXISTS handles fresh + upgrade.
+    // Dedup any existing duplicates first so the index can be created.
+    sql: `
+      DELETE FROM timeline_entries a USING timeline_entries b
+        WHERE a.page_id = b.page_id
+          AND a.date = b.date
+          AND a.summary = b.summary
+          AND a.id > b.id;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_timeline_dedup
+        ON timeline_entries(page_id, date, summary);
+    `,
+  },
+  {
+    version: 10,
+    name: 'drop_timeline_search_trigger',
+    // Removes the trigger that updates pages.updated_at on every timeline_entries insert.
+    // Structured timeline_entries are now graph data (queryable dates), not search text.
+    // pages.timeline (markdown) still feeds the page search_vector via trg_pages_search_vector.
+    // Removing this trigger also fixes a mutation-induced reordering bug in timeline-extract
+    // pagination (listPages ORDER BY updated_at DESC drifted as inserts touched pages).
+    sql: `
+      DROP TRIGGER IF EXISTS trg_timeline_search_vector ON timeline_entries;
+      DROP FUNCTION IF EXISTS update_page_search_vector_from_timeline();
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0

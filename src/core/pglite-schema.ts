@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS links (
   link_type    TEXT    NOT NULL DEFAULT '',
   context      TEXT    NOT NULL DEFAULT '',
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(from_page_id, to_page_id)
+  CONSTRAINT links_from_to_type_unique UNIQUE(from_page_id, to_page_id, link_type)
 );
 
 CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_page_id);
@@ -117,6 +117,8 @@ CREATE TABLE IF NOT EXISTS timeline_entries (
 
 CREATE INDEX IF NOT EXISTS idx_timeline_page ON timeline_entries(page_id);
 CREATE INDEX IF NOT EXISTS idx_timeline_date ON timeline_entries(date);
+-- Dedup constraint: same (page, date, summary) treated as same event
+CREATE UNIQUE INDEX IF NOT EXISTS idx_timeline_dedup ON timeline_entries(page_id, date, summary);
 
 -- ============================================================
 -- page_versions: snapshot history
@@ -287,19 +289,9 @@ CREATE TRIGGER trg_pages_search_vector
   FOR EACH ROW
   EXECUTE FUNCTION update_page_search_vector();
 
-CREATE OR REPLACE FUNCTION update_page_search_vector_from_timeline() RETURNS trigger AS $$
-DECLARE
-  page_row pages%ROWTYPE;
-BEGIN
-  UPDATE pages SET updated_at = now()
-  WHERE id = coalesce(NEW.page_id, OLD.page_id);
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
+-- Note: timeline_entries trigger removed (v0.10.1).
+-- Structured timeline_entries power temporal queries (graph layer).
+-- pages.timeline (markdown) still feeds search_vector via trg_pages_search_vector.
 DROP TRIGGER IF EXISTS trg_timeline_search_vector ON timeline_entries;
-CREATE TRIGGER trg_timeline_search_vector
-  AFTER INSERT OR UPDATE OR DELETE ON timeline_entries
-  FOR EACH ROW
-  EXECUTE FUNCTION update_page_search_vector_from_timeline();
+DROP FUNCTION IF EXISTS update_page_search_vector_from_timeline();
 `;

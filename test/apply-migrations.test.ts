@@ -102,7 +102,9 @@ describe('buildPlan — diff against completed + installed VERSION', () => {
     expect(plan.applied).toEqual([]);
     expect(plan.partial).toEqual([]);
     expect(plan.pending.map(m => m.version)).toContain('0.11.0');
-    expect(plan.skippedFuture).toEqual([]);
+    // v0.12.0 (Knowledge Graph auto-wire) is registered but installed VERSION
+    // is 0.11.1, so it lands in skippedFuture until the binary catches up.
+    expect(plan.skippedFuture.map(m => m.version)).toEqual(['0.12.0']);
   });
 
   test('already applied → v0.11.0 lands in `applied` bucket, not pending', () => {

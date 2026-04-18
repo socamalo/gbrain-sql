@@ -142,7 +142,24 @@ echo "=== Discovery Complete ==="
 4. **Start embeddings.** Refresh stale embeddings (runs in background). Keyword
    search works NOW, semantic search improves as embeddings complete.
 
-5. **Offer file migration.** If the repo has binary files (.raw/ directories with
+5. **Backfill the knowledge graph.** Populate typed links and structured timeline
+   from the imported pages. Auto-link maintains both going forward, but historical
+   pages need a one-time backfill.
+
+   ```bash
+   gbrain extract links --source db --dry-run | head -20    # preview
+   gbrain extract links --source db                         # commit
+   gbrain extract timeline --source db                      # dated events
+   gbrain stats                                             # verify links > 0
+   ```
+
+   After this, `gbrain graph-query <slug> --depth 2` works and search ranks
+   well-connected entities higher. Idempotent — safe to re-run anytime.
+   Supports `--since YYYY-MM-DD` for incremental runs on huge brains.
+
+   Skip if Phase C imported zero pages (auto-link handles new writes).
+
+6. **Offer file migration.** If the repo has binary files (.raw/ directories with
    images, PDFs, audio):
    > "You have N binary files (X GB) in your brain repo. Want to move them to cloud
    > storage? Your git repo will drop from X GB to Y MB. All links keep working."

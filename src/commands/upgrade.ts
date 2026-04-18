@@ -123,7 +123,13 @@ function saveUpgradeState(oldVersion: string, newVersion: string) {
  * skills/migrations/*.md, so compiled binaries see the same set source
  * installs do.
  */
-export async function runPostUpgrade(): Promise<void> {
+export async function runPostUpgrade(args: string[] = []): Promise<void> {
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log('Usage: gbrain post-upgrade');
+    console.log('Prints feature pitches for new migrations and runs apply-migrations.');
+    console.log('Idempotent — safe to re-run any time.');
+    return;
+  }
   // Cosmetic: print feature pitches for migrations newer than the prior binary.
   try {
     const statePath = join(process.env.HOME || '', '.gbrain', 'upgrade-state.json');

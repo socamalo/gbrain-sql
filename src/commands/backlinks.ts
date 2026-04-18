@@ -12,6 +12,7 @@
 
 import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, existsSync } from 'fs';
 import { join, relative, basename } from 'path';
+import { extractEntityRefs as canonicalExtractEntityRefs } from '../core/link-extraction.ts';
 
 interface BacklinkGap {
   /** The page that mentions the entity */
@@ -24,20 +25,25 @@ interface BacklinkGap {
   sourceTitle: string;
 }
 
-/** Extract entity references from markdown content (relative links to people/companies) */
-export function extractEntityRefs(content: string, pagePath: string): { name: string; slug: string; dir: string }[] {
-  const refs: { name: string; slug: string; dir: string }[] = [];
-  // Match markdown links to brain pages: [Name](../people/slug.md) or [Name](../../companies/slug.md)
-  const linkPattern = /\[([^\]]+)\]\(([^)]*(?:people|companies)\/([^)]+\.md))\)/g;
-  let match;
-  while ((match = linkPattern.exec(content)) !== null) {
-    const name = match[1];
-    const fullPath = match[2];
-    const slug = match[3].replace('.md', '');
-    const dir = fullPath.includes('people') ? 'people' : 'companies';
-    refs.push({ name, slug, dir });
-  }
-  return refs;
+/**
+ * Extract entity references from markdown content for the filesystem-based
+ * back-link walker. Filters to people/companies only (this command historically
+ * targets just those two dirs). Slug is returned WITHOUT the dir prefix to
+ * preserve the legacy shape used by findBacklinkGaps and fixBacklinkGaps below.
+ *
+ * The canonical extractor (link-extraction.ts) returns dir-prefixed slugs
+ * (e.g. "people/alice"); this wrapper strips the prefix back off so existing
+ * filesystem-walker code that does `${dir}/${slug}` keeps working.
+ */
+export function extractEntityRefs(content: string, _pagePath: string): { name: string; slug: string; dir: string }[] {
+  const refs = canonicalExtractEntityRefs(content);
+  return refs
+    .filter(r => r.dir === 'people' || r.dir === 'companies')
+    .map(r => ({
+      name: r.name,
+      slug: r.slug.startsWith(`${r.dir}/`) ? r.slug.slice(r.dir.length + 1) : r.slug,
+      dir: r.dir,
+    }));
 }
 
 /** Extract title from page (first H1 or frontmatter title) */

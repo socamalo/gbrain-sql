@@ -189,16 +189,23 @@ export async function runDoctor(engine: BrainEngine | null, args: string[]) {
     checks.push({ name: 'embeddings', status: 'warn', message: 'Could not check embedding health' });
   }
 
-  // 8. Link integrity
+  // 8. Graph health (link + timeline coverage on entity pages).
+  // dead_links removed in v0.10.1: ON DELETE CASCADE on link FKs makes it always 0.
   try {
     const health = await engine.getHealth();
-    if (health.dead_links === 0) {
-      checks.push({ name: 'link_integrity', status: 'ok', message: 'No dead links' });
+    const linkPct = ((health.link_coverage ?? 0) * 100).toFixed(0);
+    const timelinePct = ((health.timeline_coverage ?? 0) * 100).toFixed(0);
+    if ((health.link_coverage ?? 0) >= 0.5 && (health.timeline_coverage ?? 0) >= 0.5) {
+      checks.push({ name: 'graph_coverage', status: 'ok', message: `Entity link coverage ${linkPct}%, timeline ${timelinePct}%` });
     } else {
-      checks.push({ name: 'link_integrity', status: 'warn', message: `${health.dead_links} dead link(s). Run: gbrain check-backlinks --fix` });
+      checks.push({
+        name: 'graph_coverage',
+        status: 'warn',
+        message: `Entity link coverage ${linkPct}%, timeline ${timelinePct}%. Run: gbrain link-extract && gbrain timeline-extract`,
+      });
     }
   } catch {
-    checks.push({ name: 'link_integrity', status: 'warn', message: 'Could not check link integrity' });
+    checks.push({ name: 'graph_coverage', status: 'warn', message: 'Could not check graph coverage' });
   }
 
   const hasFail = outputResults(checks, jsonOutput);
