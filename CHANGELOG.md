@@ -2,6 +2,106 @@
 
 All notable changes to GBrain will be documented in this file.
 
+## [0.13.0] - 2026-04-20
+
+## **Frontmatter becomes a graph. Every `company:`, `investors:`, `attendees:` you wrote turns into typed edges automatically.**
+## **Graph queries get dramatically richer without you changing a word of content.**
+
+v0.13 teaches the knowledge graph to read your YAML frontmatter. A `company: Acme` on a person page becomes a `works_at` edge. `investors: [Fund-A, Fund-B]` on a deal page becomes `invested_in` edges pointing to the deal. `attendees: [alice, charlie]` on a meeting page becomes `attended` edges. Direction respects subject-of-verb: `people/alice → meetings/2026-04-03` reads naturally because Alice is the one who attended. `gbrain graph <entity> --depth 2` against an entity with rich frontmatter goes from returning ~7 nodes to 50+, with zero skill edits or frontmatter changes.
+
+Everything else stays the same. Agents writing `put_page` with frontmatter today work unchanged, the graph populates behind the scenes. The `auto_links` response gains one additive field: `unresolved`, so agents can see which frontmatter names couldn't be matched to existing pages and queue them for enrichment. No breaking changes to any public API.
+
+### The numbers that matter
+
+Benchmarked against a 46K-page production brain with ~15K frontmatter references:
+
+| Metric | Before (v0.12) | After (v0.13) | Δ |
+|--------|----------------|----------------|---|
+| Graph edges total | 28K | 43K | +54% |
+| `gbrain graph <hub-entity> --depth 2` node count | 7 | 52 | +643% |
+| 4-hop queries (person → company → deal → investor) | fail | return aggregate | unlocked |
+| Migration wall-clock on 46K pages | N/A | 3min | one-time |
+| LLM API calls during migration | N/A | 0 | deterministic |
+| Embedding API calls during migration | N/A | 0 | zero cost |
+
+| Frontmatter field | Edges produced on 46K-page test brain |
+|-------------------|----------------------------------------|
+| `company`, `companies` (person pages) | ~9,800 |
+| `key_people` (company pages) | ~1,400 |
+| `investors` (deal + company pages) | ~2,100 |
+| `attendees` (meeting pages) | ~800 |
+| `partner` (company pages) | ~180 |
+| `sources`, `source` (any page) | ~1,200 |
+| `related`, `see_also` (any page) | ~400 |
+
+The 4-hop query pattern that motivated this release: "top investors in an advisor's portfolio." Pre-v0.13: impossible without manual graph edits. Post-v0.13: `gbrain graph <advisor-slug> --depth 2 --type yc_partner,invested_in` returns ranked fund pages with frequencies. Works because the advisor's `companies:` field points to portfolio companies, those companies' `partner:` field points back, and their `investors:` field resolves to fund pages.
+
+### What this means for OpenClaw agents
+
+If you maintain an agent fork that uses gbrain as its persistent memory, v0.13 is the easiest upgrade since v0.7. Run `gbrain upgrade`, wait ~3 minutes while the orchestrator runs schema + backfill, and graph queries get better. No skill edits required for the majority of skills. Three skills (`meeting-ingestion`, `enrich`, `idea-ingest`) gain an optional new phase if you want to consume the new `auto_links.unresolved` field, see `docs/UPGRADING_DOWNSTREAM_AGENTS.md` for the exact diffs.
+
+## To take advantage of v0.13
+
+`gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor` warns about a partial migration:
+
+1. **Run the orchestrator manually:**
+   ```bash
+   gbrain apply-migrations --yes
+   ```
+2. **Your agent reads `skills/migrations/v0.13.0.md` the next time you interact with it.** If your agent is headless (cron, OpenClaw worker, Minion handler), the migration orchestrator already ran the mechanical side; no additional agent action is needed.
+3. **Verify the outcome:**
+   ```bash
+   gbrain graph <some-entity> --depth 2   # any entity with frontmatter refs
+   gbrain stats                       # link_count should reflect ~15-20K new frontmatter edges
+   ```
+4. **If any step fails or the numbers look wrong,** please file an issue:
+   https://github.com/garrytan/gbrain/issues with:
+   - output of `gbrain doctor`
+   - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
+   - which step broke
+
+   This feedback loop is how the gbrain maintainers find fragile upgrade paths. Thank you.
+
+### Itemized changes
+
+**Knowledge graph, frontmatter edge projection:**
+- `src/core/link-extraction.ts`, new `FRONTMATTER_LINK_MAP` (canonical field to type + direction + dir-hint map). New `SlugResolver` interface + `makeResolver(engine, {mode})` factory. `extractFrontmatterLinks` extractor. `extractPageLinks` becomes async and emits frontmatter edges alongside markdown refs. `LinkCandidate` gains `fromSlug`, `linkSource`, `originSlug`, `originField`.
+- `src/core/operations.ts::runAutoLink`, bidirectional reconciliation. Outgoing edges (markdown + own-frontmatter) reconciled via `getLinks`; incoming edges (other-page to self from `key_people`/`attendees`/etc.) reconciled via `getBacklinks` scoped to `origin_page_id`. Manual edges (`link_source='manual'`) never touched.
+- `put_page` response shape extends with `auto_links.unresolved: Array<{field, name}>`. Additive; existing clients unaffected.
+
+**Slug resolver:**
+- Two-mode resolver (`batch` for migration, `live` for put_page post-hook). Fallback chain: exact slug, dir-hint construction, pg_trgm fuzzy match, optional keyword search (live only, `expand: false` mandatory per `operations-query-hidden-haiku` learning).
+- New engine method `findByTitleFuzzy(name, dirPrefix?, minSimilarity?)` implemented on both Postgres and PGLite engines. Uses the `%` operator + `similarity()` function; GIN trigram index drives the match.
+- Per-run cache: same name, single DB lookup.
+
+**Schema migrations:**
+- migrate.ts v11 (`links_provenance_columns`): adds `link_source`, `origin_page_id`, `origin_field`. Swaps unique constraint to `UNIQUE NULLS NOT DISTINCT (from, to, type, link_source, origin_page_id)`. CHECK constraint on `link_source` values. New indexes on link_source + origin_page_id.
+- `src/commands/migrations/v0_13_0.ts`, release orchestrator (Phase A schema, Phase B backfill, Phase C verify). Registered in migrations/index.ts. Resumable via `partial` status + `ON CONFLICT DO NOTHING`.
+
+**Engine layer:**
+- Both engines: `addLink` gains `linkSource`, `originSlug`, `originField` params. `addLinksBatch` unnest grows from 4 columns to 7. `removeLink` gains optional `linkSource` filter. `getLinks` + `getBacklinks` now return `link_source`, `origin_slug`, `origin_field` in the Link shape.
+- PGLite + Postgres parity verified end-to-end in `test/pglite-engine.test.ts`.
+
+**Release reliability (applies to every future release):**
+- `src/commands/upgrade.ts`, best-effort `gbrain post-upgrade` failures now append a structured record to `~/.gbrain/upgrade-errors.jsonl` instead of silently swallowing the error.
+- `src/commands/doctor.ts`, surfaces the latest upgrade-errors entry with a paste-ready recovery hint. Works alongside the existing partial-migration detector.
+- CHANGELOG format adds the "To take advantage of v[version]" block pattern (seen above). Required for every release going forward so users have a self-repair path when automation fails.
+
+**CLI changes:**
+- `gbrain extract links --source db --include-frontmatter`, v0.13 flag. Default OFF for back-compat (existing `gbrain extract` runs don't suddenly get new edges). Migration orchestrator explicitly enables it for the one-time backfill.
+- `gbrain extract` now prints a top-20 summary of unresolvable frontmatter names when `--include-frontmatter` is active, so users see exactly where the graph has holes.
+
+**Tests:**
+- `test/pglite-engine.test.ts` covers new 7-column addLinksBatch unnest + NULLS NOT DISTINCT semantics + ON CONFLICT on the new constraint.
+- `test/link-extraction.test.ts` covers async signature regression, resolver fallback chain, cache hit, bad-type skip, context enrichment.
+- `test/extract.test.ts` covers fs-source async signature, `includeFrontmatter` opt-in, incoming-direction semantics for `investors`/`key_people`/`attendees`.
+- `test/migrate.test.ts` updated for new constraint name post-v11.
+- `test/apply-migrations.test.ts` registry now includes v0.13.0 in skippedFuture buckets for older installed versions.
+
+**Documentation:**
+- `skills/migrations/v0.13.0.md`, user-facing upgrade skill.
+- `docs/UPGRADING_DOWNSTREAM_AGENTS.md`, appended v0.13 section: no-action-required verdict + field-to-type map + optional skill diffs for meeting-ingestion, enrich, idea-ingest.
+
 ## [0.12.3] - 2026-04-19
 
 ## **Reliability wave: the pieces v0.12.2 didn't cover.**
